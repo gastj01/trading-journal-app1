@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
 
+
 export default function NewStrategyScreen() {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
@@ -54,6 +55,21 @@ export default function NewStrategyScreen() {
       </View>
 
       <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+        <TouchableOpacity style={s.kiBtn} onPress={() => router.push('/strategy/ki-setup')}>
+          <Feather name="cpu" size={16} color="#818cf8" />
+          <View style={s.kiBtnText}>
+            <Text style={s.kiBtnTitle}>Mit KI erstellen</Text>
+            <Text style={s.kiBtnSub}>KI führt durch 6 Fragen und generiert die Strategie</Text>
+          </View>
+          <Feather name="chevron-right" size={16} color="#555" />
+        </TouchableOpacity>
+
+        <View style={s.divider}>
+          <View style={s.dividerLine} />
+          <Text style={s.dividerText}>oder manuell</Text>
+          <View style={s.dividerLine} />
+        </View>
+
         <Text style={s.label}>Name *</Text>
         <TextInput
           style={s.input}
@@ -130,4 +146,11 @@ const s = StyleSheet.create({
   switchLabel: { flex: 1 },
   switchTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
   switchSub: { color: '#666', fontSize: 12, marginTop: 2 },
+  kiBtn: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#1a1a2d', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#818cf833', marginTop: 8 },
+  kiBtnText: { flex: 1 },
+  kiBtnTitle: { color: '#c7d2fe', fontSize: 15, fontWeight: '700' },
+  kiBtnSub: { color: '#555', fontSize: 12, marginTop: 2 },
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 16 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#1e1e1e' },
+  dividerText: { color: '#444', fontSize: 12 },
 })

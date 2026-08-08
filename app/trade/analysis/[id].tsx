@@ -8,7 +8,7 @@ import { supabase } from '../../../src/lib/supabase'
 import { fetchCandles, calcMFEMAE, normalizeSymbol, normalizeInterval } from '../../../src/lib/binance'
 import { analyzeTradeWithClaude } from '../../../src/lib/claude'
 import { ANTHROPIC_KEY } from '../../(tabs)/settings'
-import type { Trade, TagDefinition } from '../../../src/types'
+import type { Trade, TagDefinition, StrategyProfile } from '../../../src/types'
 import type { MFEMAEResult } from '../../../src/lib/binance'
 
 export default function TradeAnalysisScreen() {
@@ -16,6 +16,7 @@ export default function TradeAnalysisScreen() {
   const router = useRouter()
   const [trade, setTrade] = useState<Trade | null>(null)
   const [tags, setTags] = useState<TagDefinition[]>([])
+  const [strategy, setStrategy] = useState<StrategyProfile | null>(null)
   const [ohlcv, setOhlcv] = useState<MFEMAEResult | null>(null)
   const [analysis, setAnalysis] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -34,6 +35,11 @@ export default function TradeAnalysisScreen() {
       setTrade(t)
       setTags((tagAssign ?? []).map((a: any) => a.tag).filter(Boolean))
       setHasKey(!!key)
+
+      if (t.strategy_id) {
+        const { data: strat } = await supabase.from('strategy_profiles').select('*').eq('id', t.strategy_id).single()
+        if (strat) setStrategy(strat)
+      }
 
       const interval = normalizeInterval(t.timeframe ?? '')
       if (interval) {
@@ -65,7 +71,7 @@ export default function TradeAnalysisScreen() {
     setAnalysis(null)
     setStatus('Claude analysiert...')
     try {
-      const result = await analyzeTradeWithClaude(key, trade, tags, ohlcv)
+      const result = await analyzeTradeWithClaude(key, trade, tags, ohlcv, strategy)
       setAnalysis(result)
     } catch (e: any) {
       setError(e?.message ?? 'Unbekannter Fehler')
@@ -90,6 +96,7 @@ export default function TradeAnalysisScreen() {
           <View style={s.tradeCard}>
             <Text style={s.tradeSymbol}>{trade.symbol} <Text style={trade.side === 'long' ? s.green : s.red}>{trade.side.toUpperCase()}</Text></Text>
             <Text style={s.tradeMeta}>{trade.timeframe ?? '—'} · Entry {trade.entry_price} · SL {trade.stop_loss}</Text>
+            {strategy && <Text style={s.stratMeta}>📋 {strategy.name}</Text>}
             {ohlcv && (
               <Text style={s.ohlcvMeta}>MFE {ohlcv.mfe.toFixed(2)}R · MAE {ohlcv.mae.toFixed(2)}R · {ohlcv.candles.length} Kerzen</Text>
             )}
@@ -168,6 +175,7 @@ const s = StyleSheet.create({
   tradeSymbol: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 4 },
   tradeMeta: { color: '#666', fontSize: 13 },
   ohlcvMeta: { color: '#444', fontSize: 12, marginTop: 4 },
+  stratMeta: { color: '#818cf8', fontSize: 12, marginTop: 4 },
   warningBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1a1500', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#f59e0b33', marginBottom: 16 },
   warningText: { color: '#f59e0b', fontSize: 13, flex: 1 },
   analyzeBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#22c55e', borderRadius: 12, padding: 16, marginBottom: 16 },

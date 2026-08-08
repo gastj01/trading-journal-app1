@@ -1,4 +1,4 @@
-import type { Trade, TagDefinition } from '../types'
+import type { Trade, TagDefinition, StrategyProfile } from '../types'
 import type { MFEMAEResult } from './binance'
 
 export async function analyzeTradeWithClaude(
@@ -6,6 +6,7 @@ export async function analyzeTradeWithClaude(
   trade: Trade,
   tags: TagDefinition[],
   ohlcv: MFEMAEResult | null,
+  strategy?: StrategyProfile | null,
 ): Promise<string> {
   const risk = Math.abs(trade.entry_price - trade.stop_loss)
   const rMultiple = trade.exit_price && risk > 0
@@ -22,8 +23,13 @@ export async function analyzeTradeWithClaude(
     ? `Exit: ${trade.exit_price} → ${rMultiple > 0 ? '+' : ''}${rMultiple.toFixed(2)}R`
     : 'Noch offen'
 
-  const prompt = `Du bist ein erfahrener Trading-Coach. Analysiere diesen Trade objektiv und präzise auf Deutsch.
+  const strategySection = strategy?.description
+    ? `\nSTRATEGIE-PROFIL: "${strategy.name}"\n${strategy.description}\n`
+    : ''
 
+  const prompt = `Du bist ein erfahrener Trading-Coach. Analysiere diesen Trade objektiv und präzise auf Deutsch.${strategySection ? ' Vergleiche den Trade mit den Strategie-Regeln und weise auf Abweichungen hin.' : ''}
+
+${strategySection}
 TRADE-DATEN:
 Symbol: ${trade.symbol} | Seite: ${trade.side.toUpperCase()} | Timeframe: ${trade.timeframe ?? '—'}
 Entry: ${trade.entry_price} | Stop Loss: ${trade.stop_loss} | Risiko: ${risk.toFixed(4)} (${trade.risk_percent}%)
@@ -44,8 +50,7 @@ Gib eine strukturierte Analyse mit diesen Punkten:
 1. **Entry-Qualität** — War der Entry gut gewählt? (MAE als Hinweis auf Timing)
 2. **Stop Loss** — War der SL sinnvoll platziert?
 3. **Exit-Timing** — Wurde das Potential ausgeschöpft? (MFE vs. tatsächlicher Exit)
-4. **Fehler & Muster** — Was lief falsch, was gut?
-5. **Verbesserung** — Eine konkrete Empfehlung für den nächsten Trade dieser Art
+${strategy?.description ? '4. **Strategie-Regelkonformität** — Welche Regeln wurden befolgt, welche verletzt?\n5. **Fehler & Muster** — Was lief falsch, was gut?\n6. **Verbesserung** — Eine konkrete Empfehlung für den nächsten Trade dieser Art' : '4. **Fehler & Muster** — Was lief falsch, was gut?\n5. **Verbesserung** — Eine konkrete Empfehlung für den nächsten Trade dieser Art'}
 
 Halte dich kurz und direkt. Kein Intro, keine Zusammenfassung am Ende.`
 
