@@ -1,7 +1,10 @@
 import { useEffect, useState, useMemo } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { Feather } from '@expo/vector-icons'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../src/lib/supabase'
+import { ANTHROPIC_KEY } from './settings'
 import type { Trade, TagDefinition, StrategyProfile } from '../../src/types'
 
 type Period = '7d' | '30d' | '90d' | 'all'
@@ -15,6 +18,9 @@ export default function AnalyticsScreen() {
   const [assignments, setAssignments] = useState<TagAssignment[]>([])
   const [period, setPeriod] = useState<Period>('30d')
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null)
+  const [kiAnalysis, setKiAnalysis] = useState<string | null>(null)
+  const [kiLoading, setKiLoading] = useState(false)
+  const [kiError, setKiError] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -82,6 +88,85 @@ export default function AnalyticsScreen() {
     { label: 'London', start: 7, end: 12, color: '#f59e0b' },
     { label: 'New York', start: 13, end: 20, color: '#22c55e' },
   ]
+
+  const activeStrategy = selectedStrategy ? strategies.find(s => s.id === selectedStrategy) ?? null : null
+
+  async function runStrategyKI() {
+    if (!activeStrategy) return
+    const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
+    if (!key) { setKiError('Kein API Key in Einstellungen gesetzt.'); return }
+
+    setKiLoading(true)
+    setKiError(null)
+    setKiAnalysis(null)
+
+    const sessions = [
+      { label: 'Asian', start: 0, end: 7 },
+      { label: 'London', start: 7, end: 12 },
+      { label: 'New York', start: 13, end: 20 },
+    ]
+    const sessionLines = sessions.map(sess => {
+      const t = filtered.filter(t => { const h = new Date(t.opened_at).getUTCHours(); return h >= sess.start && h < sess.end })
+      const st = calcStats(t)
+      return `  ${sess.label}: ${t.length} Trades, ${st.winRate.toFixed(0)}% WR, ${st.totalR > 0 ? '+' : ''}${st.totalR.toFixed(1)}R`
+    }).join('\n')
+
+    const days = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+    const dayLines = days.map((day, i) => {
+      const t = filtered.filter(tr => new Date(tr.opened_at).getDay() === (i + 1) % 7)
+      const st = calcStats(t)
+      return t.length > 0 ? `  ${day}: ${t.length} Trades, ${st.winRate.toFixed(0)}% WR, ${st.totalR > 0 ? '+' : ''}${st.totalR.toFixed(1)}R` : null
+    }).filter(Boolean).join('\n')
+
+    const mistakeTags = tagStats.filter(ts => ts.tag.tag_type === 'mistake' && ts.total > 0)
+      .map(ts => `  ${ts.tag.name.replace(/_/g, ' ')}: ${ts.total}× (Ø ${ts.avgR.toFixed(1)}R, ${ts.inLoss}× in Loss)`).join('\n')
+
+    const prompt = `Du bist ein erfahrener Trading-Coach. Bewerte diese Trading-Strategie objektiv auf Deutsch.
+
+STRATEGIE: "${activeStrategy.name}"
+${activeStrategy.description ? `\nREGELWERK:\n${activeStrategy.description}` : '(Kein Regelwerk hinterlegt)'}
+
+PERFORMANCE-DATEN (${filtered.length} Trades, Zeitraum: ${period === 'all' ? 'Alle' : period}):
+Win Rate: ${stats.winRate.toFixed(1)}%
+Total R: ${stats.totalR > 0 ? '+' : ''}${stats.totalR.toFixed(2)}R
+Ø R pro Trade: ${stats.avgR > 0 ? '+' : ''}${stats.avgR.toFixed(2)}R
+Profit Factor: ${stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)}
+Max Drawdown: ${stats.maxDD.toFixed(2)}R
+Wins: ${stats.wins} | Losses: ${stats.losses}
+
+SESSIONS (UTC):
+${sessionLines}
+
+WOCHENTAGE:
+${dayLines || '  Keine Daten'}
+
+FEHLER-TAGS:
+${mistakeTags || '  Keine Tags erfasst'}
+
+Gib eine strukturierte Bewertung mit:
+1. **Regelwerk-Bewertung** — Sind die Regeln klar und vollständig? Was fehlt?
+2. **Performance-Einschätzung** — Ist die Strategie profitabel? Wo liegen Schwächen?
+3. **Beste Bedingungen** — Wann funktioniert die Strategie am besten (Session, Wochentag)?
+4. **Häufige Fehler** — Welche Fehler-Tags kosten am meisten R?
+5. **Verbesserungsvorschläge** — 3-5 konkrete, umsetzbare Empfehlungen
+
+Direkt und präzise. Kein Intro.`
+
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] }),
+      })
+      if (!res.ok) throw new Error(`API ${res.status}`)
+      const data = await res.json()
+      setKiAnalysis(data.content?.[0]?.text ?? 'Keine Antwort.')
+    } catch (e: any) {
+      setKiError(e?.message ?? 'Fehler')
+    } finally {
+      setKiLoading(false)
+    }
+  }
 
   const activeStratName = selectedStrategy === null
     ? 'Alle'
@@ -244,6 +329,35 @@ export default function AnalyticsScreen() {
             })}
           </View>
         )}
+        {activeStrategy && (
+          <View style={s.section}>
+            <TouchableOpacity style={s.kiBtn} onPress={runStrategyKI} disabled={kiLoading}>
+              {kiLoading
+                ? <ActivityIndicator size="small" color="#818cf8" />
+                : <Feather name="cpu" size={16} color="#818cf8" />}
+              <Text style={s.kiBtnText}>
+                {kiLoading ? 'Analysiert...' : `"${activeStrategy.name}" mit KI bewerten`}
+              </Text>
+            </TouchableOpacity>
+
+            {kiError && <Text style={s.kiError}>{kiError}</Text>}
+
+            {kiAnalysis && (
+              <View style={s.kiResult}>
+                {kiAnalysis.split('\n').map((line, i) => {
+                  const isBold = line.startsWith('**') && line.includes('**', 2)
+                  if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
+                  if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
+                  return <Text key={i} style={s.kiText}>{line}</Text>
+                })}
+                <TouchableOpacity onPress={() => setKiAnalysis(null)} style={s.kiRerun}>
+                  <Feather name="refresh-cw" size={12} color="#555" />
+                  <Text style={s.kiRerunText}>Neu analysieren</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   )
@@ -351,4 +465,12 @@ const s = StyleSheet.create({
   tagStatR: { fontSize: 13, fontWeight: '700', width: 44, textAlign: 'right' },
   green: { color: '#22c55e' },
   red: { color: '#ef4444' },
+  kiBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1a1a2d', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#818cf833' },
+  kiBtnText: { color: '#818cf8', fontSize: 14, fontWeight: '600', flex: 1 },
+  kiError: { color: '#ef4444', fontSize: 13, marginTop: 8, fontStyle: 'italic' },
+  kiResult: { backgroundColor: '#111', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#1e1e1e' },
+  kiHeading: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 10, marginBottom: 2 },
+  kiText: { color: '#bbb', fontSize: 13, lineHeight: 20 },
+  kiRerun: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12, alignSelf: 'center' },
+  kiRerunText: { color: '#555', fontSize: 12 },
 })
