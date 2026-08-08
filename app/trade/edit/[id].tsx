@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import * as DocumentPicker from 'expo-document-picker'
+import * as FileSystem from 'expo-file-system'
 import { supabase } from '../../../src/lib/supabase'
 import type { Trade, TagDefinition } from '../../../src/types'
 
@@ -87,12 +88,22 @@ export default function EditTradeScreen() {
       const ext = file.name.split('.').pop() ?? 'jpg'
       const path = `${user.id}/${id}_${Date.now()}.${ext}`
 
-      const response = await fetch(file.uri)
-      const blob = await response.blob()
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
+      if (!token) throw new Error('Nicht eingeloggt')
 
-      const { error: upErr } = await supabase.storage
-        .from('trade-screenshots')
-        .upload(path, blob, { contentType: file.mimeType ?? 'image/jpeg', upsert: true })
+      const uploadUrl = `https://rujvwpddxxfbyibvwkgt.supabase.co/storage/v1/object/trade-screenshots/${path}`
+      const uploadResult = await FileSystem.uploadAsync(uploadUrl, file.uri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'apikey': 'sb_publishable_vL5irZwQawERH65Q6pxXrA_GfDCrEr2',
+          'Content-Type': file.mimeType ?? 'image/jpeg',
+          'x-upsert': 'true',
+        },
+      })
+      const upErr = uploadResult.status >= 300 ? { message: `HTTP ${uploadResult.status}` } : null
 
       if (upErr) {
         Alert.alert('Upload-Fehler', upErr.message)
