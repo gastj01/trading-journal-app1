@@ -89,12 +89,10 @@ export default function EditTradeScreen() {
 
       const response = await fetch(file.uri)
       const blob = await response.blob()
-      const arrayBuffer = await blob.arrayBuffer()
-      const uint8 = new Uint8Array(arrayBuffer)
 
       const { error: upErr } = await supabase.storage
         .from('trade-screenshots')
-        .upload(path, uint8, { contentType: file.mimeType ?? 'image/jpeg', upsert: true })
+        .upload(path, blob, { contentType: file.mimeType ?? 'image/jpeg', upsert: true })
 
       if (upErr) {
         Alert.alert('Upload-Fehler', upErr.message)
