@@ -95,15 +95,16 @@ export default function EditTradeScreen() {
       const uploadUrl = `https://rujvwpddxxfbyibvwkgt.supabase.co/storage/v1/object/trade-screenshots/${path}`
       const uploadResult = await FileSystem.uploadAsync(uploadUrl, file.uri, {
         httpMethod: 'POST',
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        uploadType: 1, /* MULTIPART */
+        fieldName: 'file',
+        mimeType: file.mimeType ?? 'image/jpeg',
         headers: {
           'Authorization': `Bearer ${token}`,
           'apikey': 'sb_publishable_vL5irZwQawERH65Q6pxXrA_GfDCrEr2',
-          'Content-Type': file.mimeType ?? 'image/jpeg',
           'x-upsert': 'true',
         },
       })
-      const upErr = uploadResult.status >= 300 ? { message: `HTTP ${uploadResult.status}` } : null
+      const upErr = uploadResult.status >= 300 ? { message: `HTTP ${uploadResult.status}: ${uploadResult.body}` } : null
 
       if (upErr) {
         Alert.alert('Upload-Fehler', upErr.message)
