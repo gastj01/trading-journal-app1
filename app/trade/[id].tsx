@@ -102,6 +102,10 @@ export default function TradeDetailScreen() {
               <Text style={s.manageBtnText}>Verwalten</Text>
             </TouchableOpacity>
           )}
+          <TouchableOpacity onPress={() => router.push(`/trade/analysis/${id}`)} style={s.aiBtn}>
+            <Feather name="cpu" size={14} color="#818cf8" />
+            <Text style={s.aiBtnText}>KI</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => router.push(`/trade/edit/${id}`)} style={s.closeBtn}>
             <Feather name="edit-2" size={18} color="#aaa" />
           </TouchableOpacity>
@@ -311,6 +315,8 @@ const s = StyleSheet.create({
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   manageBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#22c55e', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   manageBtnText: { color: '#000', fontWeight: '700', fontSize: 12 },
+  aiBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#1a1a2d', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#818cf833' },
+  aiBtnText: { color: '#818cf8', fontWeight: '700', fontSize: 12 },
   symbol: { color: '#fff', fontSize: 20, fontWeight: '700' },
   sidePill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   longPill: { backgroundColor: '#052e16' },

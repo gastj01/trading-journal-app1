@@ -1,15 +1,21 @@
 import { useEffect, useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../src/lib/supabase'
 import type { TradingAccount } from '../../src/types'
+
+export const ANTHROPIC_KEY = 'anthropic_api_key'
 
 export default function SettingsScreen() {
   const router = useRouter()
   const [accounts, setAccounts] = useState<TradingAccount[]>([])
   const [email, setEmail] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [apiKeySaved, setApiKeySaved] = useState(false)
+  const [showKey, setShowKey] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -18,9 +24,24 @@ export default function SettingsScreen() {
       setEmail(user.email ?? '')
       const { data } = await supabase.from('trading_accounts').select('*').eq('user_id', user.id)
       setAccounts(data ?? [])
+      const stored = await AsyncStorage.getItem(ANTHROPIC_KEY)
+      if (stored) { setApiKey(stored); setApiKeySaved(true) }
     }
     load()
   }, [])
+
+  async function saveApiKey() {
+    const trimmed = apiKey.trim()
+    if (!trimmed) {
+      await AsyncStorage.removeItem(ANTHROPIC_KEY)
+      setApiKeySaved(false)
+      Alert.alert('Gelöscht', 'API Key entfernt.')
+      return
+    }
+    await AsyncStorage.setItem(ANTHROPIC_KEY, trimmed)
+    setApiKeySaved(true)
+    Alert.alert('Gespeichert', 'Anthropic API Key gespeichert.')
+  }
 
   async function handleLogout() {
     Alert.alert('Abmelden', 'Wirklich abmelden?', [
@@ -61,6 +82,33 @@ export default function SettingsScreen() {
           <TouchableOpacity style={s.addBtn} onPress={() => router.push('/account/new')}>
             <Text style={s.addBtnText}>+ Konto hinzufügen</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Anthropic API Key */}
+        <View style={s.section}>
+          <Text style={s.sectionLabel}>KI-Analyse (Anthropic)</Text>
+          <View style={s.apiKeyRow}>
+            <TextInput
+              style={s.apiKeyInput}
+              placeholderTextColor="#444"
+              placeholder="sk-ant-..."
+              value={apiKey}
+              onChangeText={v => { setApiKey(v); setApiKeySaved(false) }}
+              secureTextEntry={!showKey}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <TouchableOpacity onPress={() => setShowKey(v => !v)} style={s.eyeBtn}>
+              <Feather name={showKey ? 'eye-off' : 'eye'} size={16} color="#555" />
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity style={[s.saveKeyBtn, apiKeySaved && s.saveKeyBtnSaved]} onPress={saveApiKey}>
+            <Feather name={apiKeySaved ? 'check' : 'save'} size={14} color={apiKeySaved ? '#22c55e' : '#fff'} />
+            <Text style={[s.saveKeyText, apiKeySaved && s.saveKeyTextSaved]}>
+              {apiKeySaved ? 'Gespeichert' : 'Speichern'}
+            </Text>
+          </TouchableOpacity>
+          <Text style={s.apiKeyHint}>Key wird nur lokal auf dem Gerät gespeichert.</Text>
         </View>
 
         {/* Info */}
@@ -106,4 +154,12 @@ const s = StyleSheet.create({
   infoText: { color: '#666', fontSize: 13 },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#ef444433', marginTop: 8 },
   logoutText: { color: '#ef4444', fontSize: 15, fontWeight: '600' },
+  apiKeyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', borderRadius: 10, borderWidth: 1, borderColor: '#2a2a2a', marginBottom: 8 },
+  apiKeyInput: { flex: 1, color: '#fff', fontSize: 13, padding: 12, fontFamily: 'monospace' },
+  eyeBtn: { padding: 12 },
+  saveKeyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#1e3a2f', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#2a2a2a', marginBottom: 6 },
+  saveKeyBtnSaved: { backgroundColor: '#052e16', borderColor: '#22c55e33' },
+  saveKeyText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  saveKeyTextSaved: { color: '#22c55e' },
+  apiKeyHint: { color: '#444', fontSize: 11 },
 })
