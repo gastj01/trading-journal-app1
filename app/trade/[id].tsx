@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Image } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
@@ -177,6 +177,17 @@ export default function TradeDetailScreen() {
           </View>
         )}
 
+        {trade.screenshot_path && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>Screenshot</Text>
+            <Image
+              source={{ uri: supabase.storage.from('trade-screenshots').getPublicUrl(trade.screenshot_path).data.publicUrl }}
+              style={s.screenshot}
+              resizeMode="contain"
+            />
+          </View>
+        )}
+
       </ScrollView>
     </SafeAreaView>
   )
@@ -273,4 +284,5 @@ const s = StyleSheet.create({
   noteLabel: { color: '#888', fontWeight: '600' },
   green: { color: '#22c55e' },
   red: { color: '#ef4444' },
+  screenshot: { width: '100%', height: 220, borderRadius: 10, backgroundColor: '#1a1a1a' },
 })
