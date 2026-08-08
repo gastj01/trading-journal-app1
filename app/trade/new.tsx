@@ -11,7 +11,9 @@ export default function NewTradeScreen() {
   const [accounts, setAccounts] = useState<TradingAccount[]>([])
   const [strategies, setStrategies] = useState<StrategyProfile[]>([])
   const [tags, setTags] = useState<TagDefinition[]>([])
+  const [stratTagLinks, setStratTagLinks] = useState<{ tag_id: string; strategy_id: string }[]>([])
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
+  const [rulesExpanded, setRulesExpanded] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const [form, setForm] = useState({
@@ -32,15 +34,17 @@ export default function NewTradeScreen() {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const [{ data: accs }, { data: strats }, { data: tagDefs }] = await Promise.all([
+      const [{ data: accs }, { data: strats }, { data: tagDefs }, { data: links }] = await Promise.all([
         supabase.from('trading_accounts').select('*').eq('user_id', user.id).eq('is_active', true),
         supabase.from('strategy_profiles').select('*').eq('user_id', user.id),
         supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id).order('tag_type'),
+        supabase.from('strategy_tag_links').select('tag_id, strategy_id').eq('user_id', user.id),
       ])
       const accList = accs ?? []
       setAccounts(accList)
       setStrategies(strats ?? [])
       setTags(tagDefs ?? [])
+      setStratTagLinks(links ?? [])
       const def = accList.find(a => a.is_default)
       if (def) setForm(f => ({ ...f, account_id: def.id, risk_percent: String(def.default_risk_percent) }))
     }
@@ -49,6 +53,12 @@ export default function NewTradeScreen() {
 
   function update(key: keyof typeof form, value: string) {
     setForm(f => ({ ...f, [key]: value }))
+  }
+
+  function selectStrategy(stratId: string) {
+    setForm(f => ({ ...f, strategy_id: stratId }))
+    const strat = strategies.find(s => s.id === stratId)
+    setRulesExpanded(!!(strat?.description))
   }
 
   function toggleTag(id: string) {
@@ -113,10 +123,21 @@ export default function NewTradeScreen() {
     router.back()
   }
 
+  const selectedStrategy = strategies.find(s => s.id === form.strategy_id)
+
+  // Compute filtered tags based on selected strategy
+  const linkedTagIds = stratTagLinks
+    .filter(l => l.strategy_id === form.strategy_id)
+    .map(l => l.tag_id)
+  const anyLinkedTagIds = new Set(stratTagLinks.map(l => l.tag_id))
+  const filteredTags = tags.filter(
+    t => !form.strategy_id || linkedTagIds.includes(t.id) || !anyLinkedTagIds.has(t.id)
+  )
+
   const tagsByType = {
-    mistake: tags.filter(t => t.tag_type === 'mistake'),
-    execution: tags.filter(t => t.tag_type === 'execution'),
-    context: tags.filter(t => t.tag_type === 'context'),
+    mistake: filteredTags.filter(t => t.tag_type === 'mistake'),
+    execution: filteredTags.filter(t => t.tag_type === 'execution'),
+    context: filteredTags.filter(t => t.tag_type === 'context'),
   }
 
   return (
@@ -184,15 +205,34 @@ export default function NewTradeScreen() {
           <>
             <Label text="Strategie" />
             <View style={s.optionRow}>
-              <TouchableOpacity style={[s.option, !form.strategy_id && s.optionActive]} onPress={() => update('strategy_id', '')}>
+              <TouchableOpacity
+                style={[s.option, !form.strategy_id && s.optionActive]}
+                onPress={() => { update('strategy_id', ''); setRulesExpanded(false) }}
+              >
                 <Text style={[s.optionText, !form.strategy_id && s.optionTextActive]}>Keine</Text>
               </TouchableOpacity>
               {strategies.map(st => (
-                <TouchableOpacity key={st.id} style={[s.option, form.strategy_id === st.id && s.optionActive]} onPress={() => update('strategy_id', st.id)}>
+                <TouchableOpacity
+                  key={st.id}
+                  style={[s.option, form.strategy_id === st.id && s.optionActive]}
+                  onPress={() => selectStrategy(st.id)}
+                >
                   <Text style={[s.optionText, form.strategy_id === st.id && s.optionTextActive]}>{st.name}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+
+            {selectedStrategy?.description ? (
+              <TouchableOpacity style={s.rulesBox} onPress={() => setRulesExpanded(v => !v)} activeOpacity={0.8}>
+                <View style={s.rulesHeader}>
+                  <Text style={s.rulesTitle}>Strategie-Regeln</Text>
+                  <Feather name={rulesExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#555" />
+                </View>
+                {rulesExpanded && (
+                  <Text style={s.rulesText}>{selectedStrategy.description}</Text>
+                )}
+              </TouchableOpacity>
+            ) : null}
           </>
         )}
 
@@ -202,7 +242,7 @@ export default function NewTradeScreen() {
         <Label text="Notizen" />
         <Input value={form.notes} onChangeText={v => update('notes', v)} multiline numberOfLines={3} />
 
-        {tags.length > 0 && (
+        {filteredTags.length > 0 && (
           <>
             <Label text="Tags" />
             {Object.entries(tagsByType).map(([type, list]) =>
@@ -273,6 +313,10 @@ const s = StyleSheet.create({
   optionTextActive: { color: '#22c55e' },
   green: { color: '#22c55e' },
   red: { color: '#ef4444' },
+  rulesBox: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#2a2a2a' },
+  rulesHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  rulesTitle: { color: '#aaa', fontSize: 12, fontWeight: '600' },
+  rulesText: { color: '#777', fontSize: 13, lineHeight: 20, marginTop: 8 },
   tagSection: { marginTop: 8 },
   tagTypeLabel: { color: '#666', fontSize: 11, fontWeight: '600', marginBottom: 6 },
   tagChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a' },

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState, useCallback } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
+import { useFocusEffect } from 'expo-router'
 import { supabase } from '../../src/lib/supabase'
 import type { StrategyProfile, TagDefinition, TagType } from '../../src/types'
 
@@ -32,7 +33,7 @@ export default function StrategyScreen() {
     setTags(tagDefs ?? [])
   }
 
-  useEffect(() => { load() }, [])
+  useFocusEffect(useCallback(() => { load() }, []))
 
   const tagGroups: Record<string, TagDefinition[]> = {
     mistake: tags.filter(t => t.tag_type === 'mistake'),
@@ -62,6 +63,16 @@ export default function StrategyScreen() {
       setShowTagForm(false)
       load()
     }
+  }
+
+  function handleDeleteStrategy(strat: StrategyProfile) {
+    Alert.alert('Strategie löschen', `"${strat.name}" wirklich löschen?`, [
+      { text: 'Abbrechen', style: 'cancel' },
+      { text: 'Löschen', style: 'destructive', onPress: async () => {
+        await supabase.from('strategy_profiles').delete().eq('id', strat.id)
+        load()
+      }},
+    ])
   }
 
   function startEdit(tag: TagDefinition) {
@@ -122,7 +133,7 @@ export default function StrategyScreen() {
             </TouchableOpacity>
 
             {strategies.map(strat => (
-              <TouchableOpacity key={strat.id} style={s.card}>
+              <View key={strat.id} style={s.card}>
                 <View style={s.cardContent}>
                   <Text style={s.cardTitle}>{strat.name}</Text>
                   {strat.description ? <Text style={s.cardDesc} numberOfLines={2}>{strat.description}</Text> : null}
@@ -132,8 +143,15 @@ export default function StrategyScreen() {
                     {strat.move_remaining_to_be_after_tp1 && <Pill label="BE nach TP1" />}
                   </View>
                 </View>
-                <Feather name="chevron-right" size={18} color="#555" />
-              </TouchableOpacity>
+                <View style={s.cardActions}>
+                  <TouchableOpacity style={s.cardAction} onPress={() => router.push(`/strategy/edit/${strat.id}`)}>
+                    <Feather name="edit-2" size={15} color="#666" />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.cardAction} onPress={() => handleDeleteStrategy(strat)}>
+                    <Feather name="trash-2" size={15} color="#ef4444" />
+                  </TouchableOpacity>
+                </View>
+              </View>
             ))}
 
             {strategies.length === 0 && (
@@ -269,6 +287,8 @@ const s = StyleSheet.create({
   addText: { color: '#22c55e', fontSize: 14, fontWeight: '600' },
   card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', borderRadius: 12, padding: 14, marginBottom: 8 },
   cardContent: { flex: 1 },
+  cardActions: { flexDirection: 'row', gap: 4 },
+  cardAction: { padding: 8 },
   cardTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 4 },
   cardDesc: { color: '#888', fontSize: 13, marginBottom: 8, lineHeight: 18 },
   pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },

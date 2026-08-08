@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../../src/lib/supabase'
 import { fetchCandles, calcMFEMAE, normalizeSymbol, normalizeInterval } from '../../../src/lib/binance'
-import { analyzeTradeWithClaude } from '../../../src/lib/claude'
+import { analyzeTradeWithClaude, buildAnalysisPrompt } from '../../../src/lib/claude'
 import { ANTHROPIC_KEY } from '../../(tabs)/settings'
 import type { Trade, TagDefinition, StrategyProfile } from '../../../src/types'
 import type { MFEMAEResult } from '../../../src/lib/binance'
+
+type Phase = 'loading' | 'prompt' | 'analyzing' | 'result' | 'error'
 
 export default function TradeAnalysisScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -19,10 +21,11 @@ export default function TradeAnalysisScreen() {
   const [strategy, setStrategy] = useState<StrategyProfile | null>(null)
   const [ohlcv, setOhlcv] = useState<MFEMAEResult | null>(null)
   const [analysis, setAnalysis] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [phase, setPhase] = useState<Phase>('loading')
   const [status, setStatus] = useState('Lade Trade...')
   const [error, setError] = useState<string | null>(null)
   const [hasKey, setHasKey] = useState(false)
+  const [promptText, setPromptText] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -33,14 +36,20 @@ export default function TradeAnalysisScreen() {
       ])
       if (!t) return
       setTrade(t)
-      setTags((tagAssign ?? []).map((a: any) => a.tag).filter(Boolean))
+      const loadedTags = (tagAssign ?? []).map((a: any) => a.tag).filter(Boolean)
+      setTags(loadedTags)
       setHasKey(!!key)
 
+      let loadedStrategy: StrategyProfile | null = null
       if (t.strategy_id) {
         const { data: strat } = await supabase.from('strategy_profiles').select('*').eq('id', t.strategy_id).single()
-        if (strat) setStrategy(strat)
+        if (strat) {
+          setStrategy(strat)
+          loadedStrategy = strat
+        }
       }
 
+      let loadedOhlcv: MFEMAEResult | null = null
       const interval = normalizeInterval(t.timeframe ?? '')
       if (interval) {
         setStatus('Lade Binance-Kerzen...')
@@ -49,12 +58,20 @@ export default function TradeAnalysisScreen() {
           const startMs = new Date(t.opened_at).getTime()
           const endMs = t.closed_at ? new Date(t.closed_at).getTime() : Date.now()
           const candles = await fetchCandles(symbol, interval, startMs, endMs)
-          if (candles.length > 0) setOhlcv(calcMFEMAE(candles, t.entry_price, t.stop_loss, t.side))
+          if (candles.length > 0) {
+            loadedOhlcv = calcMFEMAE(candles, t.entry_price, t.stop_loss, t.side)
+            setOhlcv(loadedOhlcv)
+          }
         } catch {
-          // OHLCV optional, weiter ohne
+          // OHLCV optional
         }
       }
+
+      // Build default prompt and show editor
+      const generated = buildAnalysisPrompt(t, loadedTags, loadedOhlcv, loadedStrategy)
+      setPromptText(generated)
       setStatus('')
+      setPhase('prompt')
     }
     load()
   }, [id])
@@ -64,21 +81,29 @@ export default function TradeAnalysisScreen() {
     const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
     if (!key) {
       setError('Kein Anthropic API Key gesetzt. Bitte in Einstellungen eingeben.')
+      setPhase('error')
       return
     }
-    setLoading(true)
+    setPhase('analyzing')
     setError(null)
     setAnalysis(null)
     setStatus('Claude analysiert...')
     try {
-      const result = await analyzeTradeWithClaude(key, trade, tags, ohlcv, strategy)
+      const result = await analyzeTradeWithClaude(key, trade, tags, ohlcv, strategy, promptText)
       setAnalysis(result)
+      setPhase('result')
     } catch (e: any) {
       setError(e?.message ?? 'Unbekannter Fehler')
+      setPhase('error')
     } finally {
-      setLoading(false)
       setStatus('')
     }
+  }
+
+  function resetToPrompt() {
+    setPhase('prompt')
+    setAnalysis(null)
+    setError(null)
   }
 
   return (
@@ -91,7 +116,7 @@ export default function TradeAnalysisScreen() {
         <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView style={s.scroll} contentContainerStyle={s.content}>
+      <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         {trade && (
           <View style={s.tradeCard}>
             <Text style={s.tradeSymbol}>{trade.symbol} <Text style={trade.side === 'long' ? s.green : s.red}>{trade.side.toUpperCase()}</Text></Text>
@@ -103,42 +128,60 @@ export default function TradeAnalysisScreen() {
           </View>
         )}
 
-        {!hasKey && !loading && (
+        {!hasKey && phase !== 'loading' && (
           <View style={s.warningBox}>
             <Feather name="alert-circle" size={16} color="#f59e0b" />
             <Text style={s.warningText}>Kein API Key. Bitte in Einstellungen → KI-Analyse eintragen.</Text>
           </View>
         )}
 
-        {!analysis && !loading && !error && trade && (
-          <TouchableOpacity style={s.analyzeBtn} onPress={runAnalysis} disabled={!hasKey}>
-            <Feather name="cpu" size={18} color="#000" />
-            <Text style={s.analyzeBtnText}>Jetzt analysieren</Text>
-          </TouchableOpacity>
-        )}
-
-        {loading && (
+        {phase === 'loading' && (
           <View style={s.loadingBox}>
             <ActivityIndicator size="large" color="#22c55e" />
             <Text style={s.loadingText}>{status}</Text>
           </View>
         )}
 
-        {error && (
+        {phase === 'prompt' && (
+          <>
+            <Text style={s.promptLabel}>Prompt bearbeiten</Text>
+            <TextInput
+              style={s.promptInput}
+              value={promptText}
+              onChangeText={setPromptText}
+              multiline
+              placeholderTextColor="#555"
+              textAlignVertical="top"
+            />
+            <TouchableOpacity style={s.analyzeBtn} onPress={runAnalysis} disabled={!hasKey}>
+              <Feather name="cpu" size={18} color="#000" />
+              <Text style={s.analyzeBtnText}>Analysieren</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {phase === 'analyzing' && (
+          <View style={s.loadingBox}>
+            <ActivityIndicator size="large" color="#22c55e" />
+            <Text style={s.loadingText}>{status}</Text>
+          </View>
+        )}
+
+        {phase === 'error' && (
           <View style={s.errorBox}>
             <Text style={s.errorText}>{error}</Text>
-            <TouchableOpacity onPress={runAnalysis} style={s.retryBtn}>
-              <Text style={s.retryText}>Nochmal versuchen</Text>
+            <TouchableOpacity onPress={resetToPrompt} style={s.retryBtn}>
+              <Text style={s.retryText}>Zurück zum Prompt</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {analysis && (
+        {phase === 'result' && analysis && (
           <>
             <AnalysisText text={analysis} />
-            <TouchableOpacity style={s.rerunBtn} onPress={runAnalysis}>
-              <Feather name="refresh-cw" size={14} color="#666" />
-              <Text style={s.rerunText}>Neu analysieren</Text>
+            <TouchableOpacity style={s.rerunBtn} onPress={resetToPrompt}>
+              <Feather name="edit-2" size={14} color="#666" />
+              <Text style={s.rerunText}>Prompt bearbeiten & neu analysieren</Text>
             </TouchableOpacity>
           </>
         )}
@@ -178,6 +221,8 @@ const s = StyleSheet.create({
   stratMeta: { color: '#818cf8', fontSize: 12, marginTop: 4 },
   warningBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1a1500', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#f59e0b33', marginBottom: 16 },
   warningText: { color: '#f59e0b', fontSize: 13, flex: 1 },
+  promptLabel: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  promptInput: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, color: '#fff', fontSize: 13, borderWidth: 1, borderColor: '#2a2a2a', minHeight: 300, lineHeight: 20, marginBottom: 14 },
   analyzeBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#22c55e', borderRadius: 12, padding: 16, marginBottom: 16 },
   analyzeBtnText: { color: '#000', fontSize: 16, fontWeight: '700' },
   loadingBox: { alignItems: 'center', gap: 12, padding: 40 },

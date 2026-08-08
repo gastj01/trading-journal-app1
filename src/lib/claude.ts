@@ -1,13 +1,12 @@
 import type { Trade, TagDefinition, StrategyProfile } from '../types'
 import type { MFEMAEResult } from './binance'
 
-export async function analyzeTradeWithClaude(
-  apiKey: string,
+export function buildAnalysisPrompt(
   trade: Trade,
   tags: TagDefinition[],
   ohlcv: MFEMAEResult | null,
   strategy?: StrategyProfile | null,
-): Promise<string> {
+): string {
   const risk = Math.abs(trade.entry_price - trade.stop_loss)
   const rMultiple = trade.exit_price && risk > 0
     ? ((trade.side === 'long' ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price) / risk)
@@ -27,10 +26,9 @@ export async function analyzeTradeWithClaude(
     ? `\nSTRATEGIE-PROFIL: "${strategy.name}"\n${strategy.description}\n`
     : ''
 
-  const prompt = `Du bist ein erfahrener Trading-Coach. Analysiere diesen Trade objektiv und präzise auf Deutsch.${strategySection ? ' Vergleiche den Trade mit den Strategie-Regeln und weise auf Abweichungen hin.' : ''}
+  return `Du bist ein erfahrener Trading-Coach. Analysiere diesen Trade objektiv und präzise auf Deutsch.${strategySection ? ' Vergleiche den Trade mit den Strategie-Regeln und weise auf Abweichungen hin.' : ''}
 
-${strategySection}
-TRADE-DATEN:
+${strategySection}TRADE-DATEN:
 Symbol: ${trade.symbol} | Seite: ${trade.side.toUpperCase()} | Timeframe: ${trade.timeframe ?? '—'}
 Entry: ${trade.entry_price} | Stop Loss: ${trade.stop_loss} | Risiko: ${risk.toFixed(4)} (${trade.risk_percent}%)
 ${exitSection}
@@ -53,6 +51,17 @@ Gib eine strukturierte Analyse mit diesen Punkten:
 ${strategy?.description ? '4. **Strategie-Regelkonformität** — Welche Regeln wurden befolgt, welche verletzt?\n5. **Fehler & Muster** — Was lief falsch, was gut?\n6. **Verbesserung** — Eine konkrete Empfehlung für den nächsten Trade dieser Art' : '4. **Fehler & Muster** — Was lief falsch, was gut?\n5. **Verbesserung** — Eine konkrete Empfehlung für den nächsten Trade dieser Art'}
 
 Halte dich kurz und direkt. Kein Intro, keine Zusammenfassung am Ende.`
+}
+
+export async function analyzeTradeWithClaude(
+  apiKey: string,
+  trade: Trade,
+  tags: TagDefinition[],
+  ohlcv: MFEMAEResult | null,
+  strategy?: StrategyProfile | null,
+  customPrompt?: string,
+): Promise<string> {
+  const prompt = customPrompt ?? buildAnalysisPrompt(trade, tags, ohlcv, strategy)
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
