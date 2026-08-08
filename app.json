@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Trading Journal",
+    "slug": "trading-journal-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": false,
+    "splash": {
+      "backgroundColor": "#0f0f0f"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0f0f0f",
+        "foregroundImage": "./assets/adaptive-icon.png"
+      },
+      "package": "com.tradingjournal.app"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "scheme": "tradingjournal",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "94c03b05-d6de-467e-ac39-21c950f39b15"
+      }
+    }
+  }
+}
