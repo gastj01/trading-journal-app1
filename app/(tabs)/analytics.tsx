@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { supabase } from '../../src/lib/supabase'
-import type { Trade, TagDefinition } from '../../src/types'
+import type { Trade, TagDefinition, StrategyProfile } from '../../src/types'
 
 type Period = '7d' | '30d' | '90d' | 'all'
 
@@ -14,9 +14,16 @@ interface TagStat {
   avgR: number
 }
 
+interface StrategyStat {
+  strategy: StrategyProfile | null
+  name: string
+  trades: Trade[]
+}
+
 export default function AnalyticsScreen() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [tagStats, setTagStats] = useState<TagStat[]>([])
+  const [strategyStats, setStrategyStats] = useState<StrategyStat[]>([])
   const [period, setPeriod] = useState<Period>('30d')
 
   useEffect(() => {
@@ -24,14 +31,31 @@ export default function AnalyticsScreen() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      const [{ data: tradeData }, { data: assignments }, { data: tagDefs }] = await Promise.all([
+      const [{ data: tradeData }, { data: assignments }, { data: tagDefs }, { data: strategies }] = await Promise.all([
         supabase.from('trades').select('*').eq('user_id', user.id).eq('status', 'closed').order('opened_at', { ascending: false }),
         supabase.from('trade_tag_assignments').select('tag_id, trade_id').eq('user_id', user.id),
         supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id),
+        supabase.from('strategy_profiles').select('*').eq('user_id', user.id),
       ])
 
       const closedTrades = tradeData ?? []
       setTrades(closedTrades)
+
+      // Strategy breakdown
+      const stratMap = new Map((strategies ?? []).map((s: StrategyProfile) => [s.id, s]))
+      const stratGroups = new Map<string | null, Trade[]>()
+      for (const t of closedTrades) {
+        const key = t.strategy_id ?? null
+        if (!stratGroups.has(key)) stratGroups.set(key, [])
+        stratGroups.get(key)!.push(t)
+      }
+      const stratList: StrategyStat[] = []
+      for (const [id, tradeList] of stratGroups.entries()) {
+        const strategy = id ? (stratMap.get(id) ?? null) : null
+        stratList.push({ strategy, name: strategy?.name ?? 'Ohne Strategie', trades: tradeList })
+      }
+      stratList.sort((a, b) => b.trades.length - a.trades.length)
+      setStrategyStats(stratList)
 
       if (!assignments || !tagDefs) return
 
@@ -178,6 +202,31 @@ export default function AnalyticsScreen() {
           })}
         </View>
 
+        {strategyStats.length > 0 && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>Nach Strategie</Text>
+            {strategyStats.map(ss => {
+              const st = calcStats(ss.trades)
+              return (
+                <View key={ss.name} style={s.stratRow}>
+                  <View style={s.stratLeft}>
+                    <Text style={s.stratName} numberOfLines={1}>{ss.name}</Text>
+                    <Text style={s.stratCount}>{ss.trades.length} Trades · {st.winRate.toFixed(0)}% WR</Text>
+                  </View>
+                  <View style={s.stratRight}>
+                    <Text style={[s.stratR, st.totalR >= 0 ? s.green : s.red]}>
+                      {st.totalR > 0 ? '+' : ''}{st.totalR.toFixed(2)}R
+                    </Text>
+                    <Text style={[s.stratAvgR, st.avgR >= 0 ? s.green : s.red]}>
+                      Ø {st.avgR > 0 ? '+' : ''}{st.avgR.toFixed(2)}R
+                    </Text>
+                  </View>
+                </View>
+              )
+            })}
+          </View>
+        )}
+
         {tagStats.length > 0 && (
           <View style={s.section}>
             <Text style={s.sectionTitle}>Tag-Analyse</Text>
@@ -304,6 +353,13 @@ const s = StyleSheet.create({
   dayCount: { color: '#666', fontSize: 12, flex: 1 },
   dayR: { fontSize: 14, fontWeight: '700', width: 60, textAlign: 'right' },
   dayWR: { color: '#888', fontSize: 12, width: 55, textAlign: 'right' },
+  stratRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#1a1a1a' },
+  stratLeft: { flex: 1, marginRight: 12 },
+  stratName: { color: '#fff', fontSize: 14, fontWeight: '600', marginBottom: 2 },
+  stratCount: { color: '#666', fontSize: 12 },
+  stratRight: { alignItems: 'flex-end' },
+  stratR: { fontSize: 16, fontWeight: '700' },
+  stratAvgR: { fontSize: 12, marginTop: 2 },
   tagGroup: { marginBottom: 16 },
   tagGroupLabel: { color: '#666', fontSize: 11, fontWeight: '600', marginBottom: 8 },
   tagStatRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1a1a1a' },
