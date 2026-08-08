@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../../src/lib/supabase'
-import type { TagDefinition, TagType } from '../../../src/types'
+import type { TagDefinition, TagType, ChecklistItem } from '../../../src/types'
 
 export default function EditStrategyScreen() {
   const router = useRouter()
@@ -12,6 +12,9 @@ export default function EditStrategyScreen() {
   const [saving, setSaving] = useState(false)
   const [tags, setTags] = useState<TagDefinition[]>([])
   const [linkedTagIds, setLinkedTagIds] = useState<string[]>([])
+  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
+  const [showAddItem, setShowAddItem] = useState(false)
+  const [newItem, setNewItem] = useState({ title: '', category: '', kind: '', description: '' })
   const [form, setForm] = useState({
     name: '',
     description: '',
@@ -25,10 +28,11 @@ export default function EditStrategyScreen() {
       if (!id) return
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const [{ data: strat }, { data: tagDefs }, { data: links }] = await Promise.all([
+      const [{ data: strat }, { data: tagDefs }, { data: links }, { data: items }] = await Promise.all([
         supabase.from('strategy_profiles').select('*').eq('id', id).single(),
         supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id).order('tag_type'),
         supabase.from('strategy_tag_links').select('tag_id').eq('strategy_id', id),
+        supabase.from('strategy_checklist_items').select('*').eq('strategy_id', id).order('sort_order'),
       ])
       if (!strat) return
       setForm({
@@ -40,6 +44,7 @@ export default function EditStrategyScreen() {
       })
       setTags(tagDefs ?? [])
       setLinkedTagIds((links ?? []).map((l: any) => l.tag_id))
+      setChecklistItems(items ?? [])
     }
     load()
   }, [id])
@@ -82,6 +87,50 @@ export default function EditStrategyScreen() {
     setSaving(false)
     if (error) Alert.alert('Fehler', error.message)
     else router.back()
+  }
+
+  async function handleAddItem() {
+    if (!newItem.title.trim()) {
+      Alert.alert('Fehler', 'Titel ist ein Pflichtfeld.')
+      return
+    }
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data, error } = await supabase.from('strategy_checklist_items').insert({
+      user_id: user.id,
+      strategy_id: id,
+      title: newItem.title.trim(),
+      category: newItem.category.trim() || 'Allgemein',
+      kind: newItem.kind.trim() || 'pre_trade',
+      description: newItem.description.trim() || null,
+      sort_order: checklistItems.length + 1,
+      is_active: true,
+    }).select().single()
+    if (error) {
+      Alert.alert('Fehler', error.message)
+      return
+    }
+    setChecklistItems(prev => [...prev, data])
+    setNewItem({ title: '', category: '', kind: '', description: '' })
+    setShowAddItem(false)
+  }
+
+  async function handleDeleteItem(itemId: string) {
+    Alert.alert('Item löschen', 'Wirklich löschen?', [
+      { text: 'Abbrechen', style: 'cancel' },
+      {
+        text: 'Löschen', style: 'destructive', onPress: async () => {
+          await supabase.from('strategy_checklist_items').delete().eq('id', itemId)
+          setChecklistItems(prev => prev.filter(i => i.id !== itemId))
+        }
+      },
+    ])
+  }
+
+  async function toggleItemActive(item: ChecklistItem) {
+    const newVal = !item.is_active
+    await supabase.from('strategy_checklist_items').update({ is_active: newVal }).eq('id', item.id)
+    setChecklistItems(prev => prev.map(i => i.id === item.id ? { ...i, is_active: newVal } : i))
   }
 
   const tagGroups: Record<TagType, TagDefinition[]> = {
@@ -174,6 +223,89 @@ export default function EditStrategyScreen() {
             )}
           </>
         )}
+
+        {/* Checklist Section */}
+        <View style={s.sectionHeader}>
+          <Text style={s.sectionTitle}>Checkliste</Text>
+          <Text style={s.sectionSub}>Items die beim Trade-Eintrag abgehakt werden</Text>
+        </View>
+
+        {checklistItems.map(item => (
+          <View key={item.id} style={s.checklistItem}>
+            <View style={s.checklistLeft}>
+              <View style={s.checklistTitleRow}>
+                <Text style={[s.checklistTitle, !item.is_active && s.checklistTitleInactive]}>{item.title}</Text>
+                {item.category ? (
+                  <View style={s.catBadge}>
+                    <Text style={s.catBadgeText}>{item.category}</Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+            <View style={s.checklistRight}>
+              <Switch
+                value={item.is_active}
+                onValueChange={() => toggleItemActive(item)}
+                trackColor={{ false: '#2a2a2a', true: '#22c55e' }}
+                thumbColor="#fff"
+                style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
+              />
+              <TouchableOpacity onPress={() => handleDeleteItem(item.id)} style={s.deleteBtn}>
+                <Feather name="trash-2" size={16} color="#ef4444" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        ))}
+
+        {showAddItem ? (
+          <View style={s.addItemForm}>
+            <Text style={s.label}>Titel *</Text>
+            <TextInput
+              style={s.input}
+              placeholderTextColor="#555"
+              placeholder="z.B. HTF Trend bestätigt"
+              value={newItem.title}
+              onChangeText={v => setNewItem(p => ({ ...p, title: v }))}
+            />
+            <Text style={s.label}>Kategorie</Text>
+            <TextInput
+              style={s.input}
+              placeholderTextColor="#555"
+              placeholder="z.B. Entry, Risiko, Markt"
+              value={newItem.category}
+              onChangeText={v => setNewItem(p => ({ ...p, category: v }))}
+            />
+            <Text style={s.label}>Art</Text>
+            <TextInput
+              style={s.input}
+              placeholderTextColor="#555"
+              placeholder="z.B. pre_trade"
+              value={newItem.kind}
+              onChangeText={v => setNewItem(p => ({ ...p, kind: v }))}
+            />
+            <Text style={s.label}>Beschreibung (optional)</Text>
+            <TextInput
+              style={[s.input, { height: 80, textAlignVertical: 'top' }]}
+              placeholderTextColor="#555"
+              value={newItem.description}
+              onChangeText={v => setNewItem(p => ({ ...p, description: v }))}
+              multiline
+            />
+            <View style={s.addItemBtns}>
+              <TouchableOpacity style={s.cancelBtn} onPress={() => { setShowAddItem(false); setNewItem({ title: '', category: '', kind: '', description: '' }) }}>
+                <Text style={s.cancelBtnText}>Abbrechen</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.saveItemBtn} onPress={handleAddItem}>
+                <Text style={s.saveItemBtnText}>Speichern</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <TouchableOpacity style={s.addItemBtn} onPress={() => setShowAddItem(true)}>
+            <Feather name="plus" size={16} color="#22c55e" />
+            <Text style={s.addItemBtnText}>Item hinzufügen</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </SafeAreaView>
   )
@@ -205,4 +337,22 @@ const s = StyleSheet.create({
   tagChipActive: { backgroundColor: '#1a2a3a', borderColor: '#3b82f6' },
   tagChipText: { color: '#888', fontSize: 13 },
   tagChipTextActive: { color: '#60a5fa' },
+  // Checklist styles
+  checklistItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#2a2a2a' },
+  checklistLeft: { flex: 1, marginRight: 8 },
+  checklistTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  checklistTitle: { color: '#fff', fontSize: 14, fontWeight: '500' },
+  checklistTitleInactive: { color: '#555' },
+  checklistRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  catBadge: { backgroundColor: '#252525', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  catBadgeText: { color: '#888', fontSize: 11 },
+  deleteBtn: { padding: 6 },
+  addItemBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#2a2a2a', borderStyle: 'dashed' },
+  addItemBtnText: { color: '#22c55e', fontSize: 14, fontWeight: '600' },
+  addItemForm: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#2a2a2a' },
+  addItemBtns: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  cancelBtn: { flex: 1, backgroundColor: '#252525', borderRadius: 8, padding: 12, alignItems: 'center' },
+  cancelBtnText: { color: '#888', fontWeight: '600' },
+  saveItemBtn: { flex: 1, backgroundColor: '#22c55e', borderRadius: 8, padding: 12, alignItems: 'center' },
+  saveItemBtnText: { color: '#000', fontWeight: '700' },
 })

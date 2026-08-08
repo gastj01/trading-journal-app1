@@ -128,6 +128,31 @@ export interface TradeScreenshot {
   created_at: string
 }
 
+export interface ChecklistItem {
+  id: string
+  user_id: string
+  strategy_id: string | null
+  kind: string
+  category: string
+  title: string
+  description: string | null
+  sort_order: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ChecklistResponse {
+  id: string
+  user_id: string
+  trade_id: string
+  checklist_item_id: string
+  status: 'checked' | 'unchecked'
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
 // Computed stats
 export interface TradeStats {
   totalTrades: number

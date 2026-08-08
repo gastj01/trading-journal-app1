@@ -6,7 +6,7 @@ import { Feather } from '@expo/vector-icons'
 import * as DocumentPicker from 'expo-document-picker'
 import * as FileSystem from 'expo-file-system/legacy'
 import { supabase } from '../../../src/lib/supabase'
-import type { Trade, TagDefinition, StrategyProfile } from '../../../src/types'
+import type { Trade, TagDefinition, StrategyProfile, ChecklistItem } from '../../../src/types'
 
 export default function EditTradeScreen() {
   const router = useRouter()
@@ -19,6 +19,8 @@ export default function EditTradeScreen() {
   const [stratTagLinks, setStratTagLinks] = useState<{ tag_id: string; strategy_id: string }[]>([])
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
   const [rulesExpanded, setRulesExpanded] = useState(false)
+  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
+  const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
   const [form, setForm] = useState({
     symbol: '',
     side: 'long' as 'long' | 'short',
@@ -39,12 +41,13 @@ export default function EditTradeScreen() {
       if (!id) return
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const [{ data }, { data: tagDefs }, { data: assignments }, { data: strats }, { data: links }] = await Promise.all([
+      const [{ data }, { data: tagDefs }, { data: assignments }, { data: strats }, { data: links }, { data: responses }] = await Promise.all([
         supabase.from('trades').select('*').eq('id', id).single(),
         supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id).order('tag_type'),
         supabase.from('trade_tag_assignments').select('tag_id').eq('trade_id', id),
         supabase.from('strategy_profiles').select('*').eq('user_id', user.id),
         supabase.from('strategy_tag_links').select('tag_id, strategy_id').eq('user_id', user.id),
+        supabase.from('trade_checklist_responses').select('checklist_item_id, status').eq('trade_id', id),
       ])
       if (!data) return
       setTrade(data)
@@ -70,10 +73,41 @@ export default function EditTradeScreen() {
       if (stratId) {
         const strat = (strats ?? []).find((s: StrategyProfile) => s.id === stratId)
         setRulesExpanded(!!(strat?.description))
+        // Load checklist items for this strategy
+        const { data: items } = await supabase
+          .from('strategy_checklist_items')
+          .select('*')
+          .eq('strategy_id', stratId)
+          .eq('is_active', true)
+          .order('sort_order')
+        setChecklistItems(items ?? [])
+        // Pre-populate checked state from existing responses
+        const checkedSet = new Set<string>(
+          (responses ?? [])
+            .filter((r: any) => r.status === 'checked')
+            .map((r: any) => r.checklist_item_id)
+        )
+        setCheckedItems(checkedSet)
       }
     }
     load()
   }, [id])
+
+  async function loadChecklistItems(strategyId: string) {
+    if (!strategyId) {
+      setChecklistItems([])
+      setCheckedItems(new Set())
+      return
+    }
+    const { data } = await supabase
+      .from('strategy_checklist_items')
+      .select('*')
+      .eq('strategy_id', strategyId)
+      .eq('is_active', true)
+      .order('sort_order')
+    setChecklistItems(data ?? [])
+    setCheckedItems(new Set())
+  }
 
   function update(key: keyof typeof form, value: string) {
     setForm(f => ({ ...f, [key]: value }))
@@ -83,6 +117,16 @@ export default function EditTradeScreen() {
     setForm(f => ({ ...f, strategy_id: stratId }))
     const strat = strategies.find(s => s.id === stratId)
     setRulesExpanded(!!(strat?.description))
+    loadChecklistItems(stratId)
+  }
+
+  function toggleChecked(itemId: string) {
+    setCheckedItems(prev => {
+      const next = new Set(prev)
+      if (next.has(itemId)) next.delete(itemId)
+      else next.add(itemId)
+      return next
+    })
   }
 
   function toggleTag(tagId: string) {
@@ -173,6 +217,19 @@ export default function EditTradeScreen() {
     if (selectedTagIds.length > 0) {
       await supabase.from('trade_tag_assignments').insert(
         selectedTagIds.map(tag_id => ({ tag_id, trade_id: id, user_id: user.id }))
+      )
+    }
+
+    // Save checklist responses
+    await supabase.from('trade_checklist_responses').delete().eq('trade_id', id)
+    if (checklistItems.length > 0) {
+      await supabase.from('trade_checklist_responses').insert(
+        checklistItems.map(item => ({
+          user_id: user.id,
+          trade_id: id,
+          checklist_item_id: item.id,
+          status: checkedItems.has(item.id) ? 'checked' : 'unchecked',
+        }))
       )
     }
 
@@ -272,7 +329,7 @@ export default function EditTradeScreen() {
             <View style={s.optionRow}>
               <TouchableOpacity
                 style={[s.option, !form.strategy_id && s.optionActive]}
-                onPress={() => { update('strategy_id', ''); setRulesExpanded(false) }}
+                onPress={() => { update('strategy_id', ''); setRulesExpanded(false); loadChecklistItems('') }}
               >
                 <Text style={[s.optionText, !form.strategy_id && s.optionTextActive]}>Keine</Text>
               </TouchableOpacity>
@@ -298,6 +355,34 @@ export default function EditTradeScreen() {
                 )}
               </TouchableOpacity>
             ) : null}
+
+            {checklistItems.length > 0 && (
+              <View style={s.checklistSection}>
+                <Text style={s.checklistSectionTitle}>Checkliste</Text>
+                {checklistItems.map(item => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={s.checklistRow}
+                    onPress={() => toggleChecked(item.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Feather
+                      name={checkedItems.has(item.id) ? 'check-square' : 'square'}
+                      size={20}
+                      color={checkedItems.has(item.id) ? '#22c55e' : '#555'}
+                    />
+                    <Text style={[s.checklistItemTitle, checkedItems.has(item.id) && s.checklistItemChecked]}>
+                      {item.title}
+                    </Text>
+                    {item.category ? (
+                      <View style={s.catBadge}>
+                        <Text style={s.catBadgeText}>{item.category}</Text>
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </>
         )}
 
@@ -398,4 +483,12 @@ const s = StyleSheet.create({
   screenshotTextDone: { color: '#22c55e' },
   removeScreenshot: { marginTop: 6, alignSelf: 'flex-start' },
   removeScreenshotText: { color: '#ef4444', fontSize: 12 },
+  // Checklist
+  checklistSection: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#2a2a2a' },
+  checklistSectionTitle: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  checklistRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#252525' },
+  checklistItemTitle: { color: '#ccc', fontSize: 14, flex: 1 },
+  checklistItemChecked: { color: '#22c55e' },
+  catBadge: { backgroundColor: '#252525', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  catBadgeText: { color: '#888', fontSize: 11 },
 })

@@ -8,6 +8,16 @@ import { fetchCandles, calcMFEMAE, normalizeSymbol, normalizeInterval } from '..
 import type { Trade, PartialProfit, ManagementEvent, TagDefinition } from '../../src/types'
 import type { MFEMAEResult } from '../../src/lib/binance'
 
+interface ChecklistResponseWithItem {
+  id: string
+  checklist_item_id: string
+  status: 'checked' | 'unchecked'
+  item: {
+    title: string
+    category: string
+  } | null
+}
+
 export default function TradeDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
@@ -15,22 +25,25 @@ export default function TradeDetailScreen() {
   const [tps, setTps] = useState<PartialProfit[]>([])
   const [events, setEvents] = useState<ManagementEvent[]>([])
   const [tags, setTags] = useState<TagDefinition[]>([])
+  const [checklistResponses, setChecklistResponses] = useState<ChecklistResponseWithItem[]>([])
   const [ohlcv, setOhlcv] = useState<MFEMAEResult | null>(null)
   const [ohlcvLoading, setOhlcvLoading] = useState(false)
   const [ohlcvError, setOhlcvError] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
-      const [{ data: t }, { data: tp }, { data: ev }, { data: tagAssign }] = await Promise.all([
+      const [{ data: t }, { data: tp }, { data: ev }, { data: tagAssign }, { data: clResponses }] = await Promise.all([
         supabase.from('trades').select('*').eq('id', id).single(),
         supabase.from('trade_partial_profits').select('*').eq('trade_id', id).order('label'),
         supabase.from('trade_management_events').select('*').eq('trade_id', id).order('event_time'),
         supabase.from('trade_tag_assignments').select('*, tag:trade_tag_definitions(*)').eq('trade_id', id),
+        supabase.from('trade_checklist_responses').select('*, item:strategy_checklist_items(*)').eq('trade_id', id),
       ])
       setTrade(t)
       setTps(tp ?? [])
       setEvents(ev ?? [])
       setTags((tagAssign ?? []).map((a: any) => a.tag).filter(Boolean))
+      setChecklistResponses(clResponses ?? [])
 
       if (t) loadOhlcv(t)
     }
@@ -201,6 +214,29 @@ export default function TradeDetailScreen() {
                 </View>
               ))}
             </View>
+          </View>
+        )}
+
+        {checklistResponses.length > 0 && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>Checkliste</Text>
+            {checklistResponses.map(resp => (
+              <View key={resp.id} style={s.clRow}>
+                <Feather
+                  name={resp.status === 'checked' ? 'check-square' : 'square'}
+                  size={18}
+                  color={resp.status === 'checked' ? '#22c55e' : '#555'}
+                />
+                <Text style={[s.clTitle, resp.status === 'checked' && s.clChecked]}>
+                  {resp.item?.title ?? ''}
+                </Text>
+                {resp.item?.category ? (
+                  <View style={s.clBadge}>
+                    <Text style={s.clBadgeText}>{resp.item.category}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ))}
           </View>
         )}
 
@@ -384,4 +420,9 @@ const s = StyleSheet.create({
   captureLabel: { color: '#666', fontSize: 13, flex: 1 },
   captureValue: { fontSize: 16, fontWeight: '700' },
   captureHint: { color: '#555', fontSize: 12 },
+  clRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#1a1a1a' },
+  clTitle: { color: '#ccc', fontSize: 14, flex: 1 },
+  clChecked: { color: '#22c55e' },
+  clBadge: { backgroundColor: '#252525', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  clBadgeText: { color: '#888', fontSize: 11 },
 })

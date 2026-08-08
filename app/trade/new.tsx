@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
-import type { TradingAccount, StrategyProfile, TagDefinition } from '../../src/types'
+import type { TradingAccount, StrategyProfile, TagDefinition, ChecklistItem } from '../../src/types'
 
 export default function NewTradeScreen() {
   const router = useRouter()
@@ -15,6 +15,8 @@ export default function NewTradeScreen() {
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
   const [rulesExpanded, setRulesExpanded] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
+  const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
 
   const [form, setForm] = useState({
     account_id: '',
@@ -51,6 +53,22 @@ export default function NewTradeScreen() {
     load()
   }, [])
 
+  async function loadChecklistItems(strategyId: string) {
+    if (!strategyId) {
+      setChecklistItems([])
+      setCheckedItems(new Set())
+      return
+    }
+    const { data } = await supabase
+      .from('strategy_checklist_items')
+      .select('*')
+      .eq('strategy_id', strategyId)
+      .eq('is_active', true)
+      .order('sort_order')
+    setChecklistItems(data ?? [])
+    setCheckedItems(new Set())
+  }
+
   function update(key: keyof typeof form, value: string) {
     setForm(f => ({ ...f, [key]: value }))
   }
@@ -59,6 +77,16 @@ export default function NewTradeScreen() {
     setForm(f => ({ ...f, strategy_id: stratId }))
     const strat = strategies.find(s => s.id === stratId)
     setRulesExpanded(!!(strat?.description))
+    loadChecklistItems(stratId)
+  }
+
+  function toggleChecked(itemId: string) {
+    setCheckedItems(prev => {
+      const next = new Set(prev)
+      if (next.has(itemId)) next.delete(itemId)
+      else next.add(itemId)
+      return next
+    })
   }
 
   function toggleTag(id: string) {
@@ -116,6 +144,17 @@ export default function NewTradeScreen() {
     if (selectedTagIds.length > 0 && tradeData) {
       await supabase.from('trade_tag_assignments').insert(
         selectedTagIds.map(tag_id => ({ tag_id, trade_id: tradeData.id, user_id: user.id }))
+      )
+    }
+
+    if (checklistItems.length > 0 && tradeData) {
+      await supabase.from('trade_checklist_responses').insert(
+        checklistItems.map(item => ({
+          user_id: user.id,
+          trade_id: tradeData.id,
+          checklist_item_id: item.id,
+          status: checkedItems.has(item.id) ? 'checked' : 'unchecked',
+        }))
       )
     }
 
@@ -207,7 +246,7 @@ export default function NewTradeScreen() {
             <View style={s.optionRow}>
               <TouchableOpacity
                 style={[s.option, !form.strategy_id && s.optionActive]}
-                onPress={() => { update('strategy_id', ''); setRulesExpanded(false) }}
+                onPress={() => { update('strategy_id', ''); setRulesExpanded(false); loadChecklistItems('') }}
               >
                 <Text style={[s.optionText, !form.strategy_id && s.optionTextActive]}>Keine</Text>
               </TouchableOpacity>
@@ -233,6 +272,34 @@ export default function NewTradeScreen() {
                 )}
               </TouchableOpacity>
             ) : null}
+
+            {checklistItems.length > 0 && (
+              <View style={s.checklistSection}>
+                <Text style={s.checklistSectionTitle}>Checkliste</Text>
+                {checklistItems.map(item => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={s.checklistRow}
+                    onPress={() => toggleChecked(item.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Feather
+                      name={checkedItems.has(item.id) ? 'check-square' : 'square'}
+                      size={20}
+                      color={checkedItems.has(item.id) ? '#22c55e' : '#555'}
+                    />
+                    <Text style={[s.checklistItemTitle, checkedItems.has(item.id) && s.checklistItemChecked]}>
+                      {item.title}
+                    </Text>
+                    {item.category ? (
+                      <View style={s.catBadge}>
+                        <Text style={s.catBadgeText}>{item.category}</Text>
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </>
         )}
 
@@ -323,4 +390,12 @@ const s = StyleSheet.create({
   tagChipActive: { backgroundColor: '#1a2a3a', borderColor: '#3b82f6' },
   tagChipText: { color: '#888', fontSize: 13 },
   tagChipTextActive: { color: '#60a5fa' },
+  // Checklist
+  checklistSection: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#2a2a2a' },
+  checklistSectionTitle: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  checklistRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#252525' },
+  checklistItemTitle: { color: '#ccc', fontSize: 14, flex: 1 },
+  checklistItemChecked: { color: '#22c55e' },
+  catBadge: { backgroundColor: '#252525', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  catBadgeText: { color: '#888', fontSize: 11 },
 })
