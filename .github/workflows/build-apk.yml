@@ -36,15 +36,18 @@ jobs:
       - name: Build APK
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
           ANDROID_HOME: /usr/local/lib/android/sdk
 
+      - name: Find APK
+        run: find android/app/build/outputs/apk -name "*.apk" | tee apk-path.txt
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: trading-journal-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/release/*.apk
           retention-days: 7
