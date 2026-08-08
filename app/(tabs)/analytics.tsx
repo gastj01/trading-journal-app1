@@ -2,25 +2,71 @@ import { useEffect, useState } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { supabase } from '../../src/lib/supabase'
-import type { Trade } from '../../src/types'
+import type { Trade, TagDefinition } from '../../src/types'
 
 type Period = '7d' | '30d' | '90d' | 'all'
 
+interface TagStat {
+  tag: TagDefinition
+  total: number
+  inLoss: number
+  inWin: number
+  avgR: number
+}
+
 export default function AnalyticsScreen() {
   const [trades, setTrades] = useState<Trade[]>([])
+  const [tagStats, setTagStats] = useState<TagStat[]>([])
   const [period, setPeriod] = useState<Period>('30d')
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const { data } = await supabase
-        .from('trades')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('status', 'closed')
-        .order('opened_at', { ascending: false })
-      setTrades(data ?? [])
+
+      const [{ data: tradeData }, { data: assignments }, { data: tagDefs }] = await Promise.all([
+        supabase.from('trades').select('*').eq('user_id', user.id).eq('status', 'closed').order('opened_at', { ascending: false }),
+        supabase.from('trade_tag_assignments').select('tag_id, trade_id').eq('user_id', user.id),
+        supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id),
+      ])
+
+      const closedTrades = tradeData ?? []
+      setTrades(closedTrades)
+
+      if (!assignments || !tagDefs) return
+
+      const tradeMap = new Map(closedTrades.map(t => [t.id, t]))
+      const stats: Record<string, TagStat> = {}
+
+      for (const tag of tagDefs) {
+        stats[tag.id] = { tag, total: 0, inLoss: 0, inWin: 0, avgR: 0 }
+      }
+
+      const tagRValues: Record<string, number[]> = {}
+
+      for (const a of assignments) {
+        const trade = tradeMap.get(a.trade_id)
+        if (!trade || !trade.exit_price) continue
+        if (!stats[a.tag_id]) continue
+
+        const risk = Math.abs(trade.entry_price - trade.stop_loss)
+        const pnl = trade.side === 'long' ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price
+        const r = risk > 0 ? pnl / risk : 0
+        const isWin = trade.side === 'long' ? trade.exit_price > trade.entry_price : trade.exit_price < trade.entry_price
+
+        stats[a.tag_id].total++
+        if (isWin) stats[a.tag_id].inWin++
+        else stats[a.tag_id].inLoss++
+
+        if (!tagRValues[a.tag_id]) tagRValues[a.tag_id] = []
+        tagRValues[a.tag_id].push(r)
+      }
+
+      for (const [id, rArr] of Object.entries(tagRValues)) {
+        if (rArr.length > 0) stats[id].avgR = rArr.reduce((a, b) => a + b, 0) / rArr.length
+      }
+
+      setTagStats(Object.values(stats).filter(s => s.total > 0).sort((a, b) => b.total - a.total))
     }
     load()
   }, [])
@@ -35,12 +81,17 @@ export default function AnalyticsScreen() {
 
   const stats = calcStats(filtered)
 
+  const sessions = [
+    { label: 'Asian', start: 0, end: 7, color: '#818cf8' },
+    { label: 'London', start: 7, end: 12, color: '#f59e0b' },
+    { label: 'New York', start: 13, end: 20, color: '#22c55e' },
+  ]
+
   return (
     <SafeAreaView style={s.safe}>
       <ScrollView style={s.scroll} contentContainerStyle={s.content}>
         <Text style={s.title}>Analytics</Text>
 
-        {/* Period picker */}
         <View style={s.periodRow}>
           {(['7d', '30d', '90d', 'all'] as Period[]).map(p => (
             <TouchableOpacity key={p} style={[s.periodBtn, period === p && s.periodActive]} onPress={() => setPeriod(p)}>
@@ -51,7 +102,6 @@ export default function AnalyticsScreen() {
           ))}
         </View>
 
-        {/* Main stats */}
         <View style={s.grid}>
           <BigStat label="Win Rate" value={`${stats.winRate.toFixed(1)}%`} positive={stats.winRate >= 50} />
           <BigStat label="Total R" value={`${stats.totalR > 0 ? '+' : ''}${stats.totalR.toFixed(2)}R`} positive={stats.totalR > 0} />
@@ -61,11 +111,10 @@ export default function AnalyticsScreen() {
           <BigStat label="Max DD" value={`${stats.maxDD.toFixed(2)}R`} positive={false} />
         </View>
 
-        {/* Win/Loss breakdown */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Aufteilung</Text>
           <View style={s.row}>
-            <View style={[s.breakdown, { flex: stats.wins }]}>
+            <View style={[s.breakdown, { flex: Math.max(stats.wins, 0.1) }]}>
               <Text style={s.breakdownWin}>WIN {stats.wins}</Text>
             </View>
             <View style={[s.breakdown2, { flex: Math.max(stats.losses, 0.1) }]}>
@@ -74,7 +123,6 @@ export default function AnalyticsScreen() {
           </View>
         </View>
 
-        {/* Long vs Short */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Long / Short</Text>
           <View style={s.sideStats}>
@@ -83,7 +131,35 @@ export default function AnalyticsScreen() {
           </View>
         </View>
 
-        {/* Wochentage */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>Session (UTC)</Text>
+          {sessions.map(sess => {
+            const sessTrades = filtered.filter(t => {
+              const h = new Date(t.opened_at).getUTCHours()
+              return h >= sess.start && h < sess.end
+            })
+            const st = calcStats(sessTrades)
+            if (sessTrades.length === 0) return (
+              <View key={sess.label} style={s.sessRow}>
+                <View style={[s.sessIndicator, { backgroundColor: sess.color }]} />
+                <Text style={s.sessLabel}>{sess.label}</Text>
+                <Text style={s.sessEmpty}>— keine Trades</Text>
+              </View>
+            )
+            return (
+              <View key={sess.label} style={s.sessRow}>
+                <View style={[s.sessIndicator, { backgroundColor: sess.color }]} />
+                <Text style={s.sessLabel}>{sess.label}</Text>
+                <Text style={s.sessCount}>{sessTrades.length}×</Text>
+                <Text style={[s.sessR, st.totalR >= 0 ? s.green : s.red]}>
+                  {st.totalR > 0 ? '+' : ''}{st.totalR.toFixed(1)}R
+                </Text>
+                <Text style={s.sessWR}>{st.winRate.toFixed(0)}% WR</Text>
+              </View>
+            )
+          })}
+        </View>
+
         <View style={s.section}>
           <Text style={s.sectionTitle}>Nach Wochentag</Text>
           {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((day, i) => {
@@ -101,6 +177,36 @@ export default function AnalyticsScreen() {
             )
           })}
         </View>
+
+        {tagStats.length > 0 && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>Tag-Analyse</Text>
+            {['mistake', 'execution', 'context'].map(type => {
+              const list = tagStats.filter(ts => ts.tag.tag_type === type)
+              if (list.length === 0) return null
+              return (
+                <View key={type} style={s.tagGroup}>
+                  <Text style={s.tagGroupLabel}>
+                    {type === 'mistake' ? '⚠️ Fehler' : type === 'execution' ? '✅ Ausführung' : '📍 Kontext'}
+                  </Text>
+                  {list.map(ts => (
+                    <View key={ts.tag.id} style={s.tagStatRow}>
+                      <Text style={s.tagStatName} numberOfLines={1}>{ts.tag.name.replace(/_/g, ' ')}</Text>
+                      <Text style={s.tagStatCount}>{ts.total}×</Text>
+                      <View style={s.tagBar}>
+                        <View style={[s.tagBarWin, { flex: ts.inWin }]} />
+                        <View style={[s.tagBarLoss, { flex: ts.inLoss }]} />
+                      </View>
+                      <Text style={[s.tagStatR, ts.avgR >= 0 ? s.green : s.red]}>
+                        {ts.avgR > 0 ? '+' : ''}{ts.avgR.toFixed(1)}R
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )
+            })}
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   )
@@ -135,12 +241,7 @@ function calcStats(trades: Trade[]) {
     if (dd > maxDD) maxDD = dd
   }
 
-  return {
-    wins: wins.length,
-    losses: losses.length,
-    winRate: trades.length > 0 ? (wins.length / trades.length) * 100 : 0,
-    totalR, avgR, profitFactor, maxDD,
-  }
+  return { wins: wins.length, losses: losses.length, winRate: trades.length > 0 ? (wins.length / trades.length) * 100 : 0, totalR, avgR, profitFactor, maxDD }
 }
 
 function BigStat({ label, value, positive }: { label: string; value: string; positive?: boolean }) {
@@ -191,11 +292,27 @@ const s = StyleSheet.create({
   sideStatCount: { color: '#666', fontSize: 12, marginBottom: 4 },
   sideStatR: { fontSize: 18, fontWeight: '700', marginBottom: 2 },
   sideStatWR: { color: '#888', fontSize: 12 },
+  sessRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#1a1a1a', gap: 8 },
+  sessIndicator: { width: 8, height: 8, borderRadius: 4 },
+  sessLabel: { color: '#fff', fontSize: 14, fontWeight: '600', width: 70 },
+  sessCount: { color: '#666', fontSize: 12, width: 28 },
+  sessR: { fontSize: 14, fontWeight: '700', width: 60, textAlign: 'right' },
+  sessWR: { color: '#888', fontSize: 12, width: 55, textAlign: 'right' },
+  sessEmpty: { color: '#444', fontSize: 12, flex: 1 },
   dayRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#1a1a1a' },
   dayLabel: { color: '#fff', fontSize: 14, fontWeight: '600', width: 30 },
   dayCount: { color: '#666', fontSize: 12, flex: 1 },
   dayR: { fontSize: 14, fontWeight: '700', width: 60, textAlign: 'right' },
   dayWR: { color: '#888', fontSize: 12, width: 55, textAlign: 'right' },
+  tagGroup: { marginBottom: 16 },
+  tagGroupLabel: { color: '#666', fontSize: 11, fontWeight: '600', marginBottom: 8 },
+  tagStatRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1a1a1a' },
+  tagStatName: { color: '#ccc', fontSize: 13, flex: 1 },
+  tagStatCount: { color: '#555', fontSize: 12, width: 24 },
+  tagBar: { flexDirection: 'row', width: 60, height: 6, borderRadius: 3, overflow: 'hidden', backgroundColor: '#1a1a1a' },
+  tagBarWin: { backgroundColor: '#22c55e' },
+  tagBarLoss: { backgroundColor: '#ef4444' },
+  tagStatR: { fontSize: 13, fontWeight: '700', width: 44, textAlign: 'right' },
   green: { color: '#22c55e' },
   red: { color: '#ef4444' },
 })
