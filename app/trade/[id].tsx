@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Image } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Image, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
+import { fetchCandles, calcMFEMAE, normalizeSymbol, normalizeInterval } from '../../src/lib/binance'
 import type { Trade, PartialProfit, ManagementEvent, TagDefinition } from '../../src/types'
+import type { MFEMAEResult } from '../../src/lib/binance'
 
 export default function TradeDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -13,6 +15,9 @@ export default function TradeDetailScreen() {
   const [tps, setTps] = useState<PartialProfit[]>([])
   const [events, setEvents] = useState<ManagementEvent[]>([])
   const [tags, setTags] = useState<TagDefinition[]>([])
+  const [ohlcv, setOhlcv] = useState<MFEMAEResult | null>(null)
+  const [ohlcvLoading, setOhlcvLoading] = useState(false)
+  const [ohlcvError, setOhlcvError] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -26,7 +31,33 @@ export default function TradeDetailScreen() {
       setTps(tp ?? [])
       setEvents(ev ?? [])
       setTags((tagAssign ?? []).map((a: any) => a.tag).filter(Boolean))
+
+      if (t) loadOhlcv(t)
     }
+
+    async function loadOhlcv(t: Trade) {
+      const interval = normalizeInterval(t.timeframe ?? '')
+      if (!interval) return
+      setOhlcvLoading(true)
+      setOhlcvError(null)
+      try {
+        const symbol = normalizeSymbol(t.symbol)
+        const startMs = new Date(t.opened_at).getTime()
+        const endMs = t.closed_at ? new Date(t.closed_at).getTime() : Date.now()
+        const candles = await fetchCandles(symbol, interval, startMs, endMs)
+        if (candles.length === 0) {
+          setOhlcvError('Keine Kerzen gefunden')
+          return
+        }
+        const result = calcMFEMAE(candles, t.entry_price, t.stop_loss, t.side)
+        setOhlcv(result)
+      } catch (e: any) {
+        setOhlcvError(e?.message ?? 'Binance API Fehler')
+      } finally {
+        setOhlcvLoading(false)
+      }
+    }
+
     if (id) load()
   }, [id])
 
@@ -177,6 +208,50 @@ export default function TradeDetailScreen() {
           </View>
         )}
 
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>OHLCV Analyse</Text>
+          {ohlcvLoading && (
+            <View style={s.ohlcvLoading}>
+              <ActivityIndicator size="small" color="#22c55e" />
+              <Text style={s.ohlcvLoadingText}>Lade Binance-Kerzen...</Text>
+            </View>
+          )}
+          {ohlcvError && !ohlcvLoading && (
+            <Text style={s.ohlcvError}>{ohlcvError}</Text>
+          )}
+          {ohlcv && !ohlcvLoading && (
+            <>
+              <View style={s.mfeRow}>
+                <View style={s.mfeBox}>
+                  <Text style={s.mfeLabel}>MFE</Text>
+                  <Text style={s.mfeValue}>{ohlcv.mfe > 0 ? '+' : ''}{ohlcv.mfe.toFixed(2)}R</Text>
+                  <Text style={s.mfePrice}>{ohlcv.mfePrice.toLocaleString()}</Text>
+                  <Text style={s.mfeHint}>Max. Gewinn möglich</Text>
+                </View>
+                <View style={s.maeBox}>
+                  <Text style={s.maeLabel}>MAE</Text>
+                  <Text style={s.maeValue}>-{ohlcv.mae.toFixed(2)}R</Text>
+                  <Text style={s.maePrice}>{ohlcv.maePrice.toLocaleString()}</Text>
+                  <Text style={s.mfeHint}>Max. Drawdown</Text>
+                </View>
+              </View>
+              {rMultiple && ohlcv.mfe > 0 && (
+                <View style={s.captureRow}>
+                  <Text style={s.captureLabel}>Exit-Effizienz</Text>
+                  <Text style={[s.captureValue, parseFloat(rMultiple) / ohlcv.mfe >= 0.7 ? s.green : s.orange]}>
+                    {((parseFloat(rMultiple) / ohlcv.mfe) * 100).toFixed(0)}%
+                  </Text>
+                  <Text style={s.captureHint}> von {ohlcv.mfe.toFixed(2)}R ausgeschöpft</Text>
+                </View>
+              )}
+              <Text style={s.ohlcvMeta}>{ohlcv.candles.length} Kerzen · {trade.timeframe}</Text>
+            </>
+          )}
+          {!ohlcv && !ohlcvLoading && !ohlcvError && (
+            <Text style={s.ohlcvError}>Kein Timeframe gesetzt</Text>
+          )}
+        </View>
+
         {trade.screenshot_path && (
           <View style={s.section}>
             <Text style={s.sectionTitle}>Screenshot</Text>
@@ -284,5 +359,23 @@ const s = StyleSheet.create({
   noteLabel: { color: '#888', fontWeight: '600' },
   green: { color: '#22c55e' },
   red: { color: '#ef4444' },
+  orange: { color: '#f59e0b' },
   screenshot: { width: '100%', height: 220, borderRadius: 10, backgroundColor: '#1a1a1a' },
+  ohlcvLoading: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  ohlcvLoadingText: { color: '#666', fontSize: 13 },
+  ohlcvError: { color: '#555', fontSize: 13, fontStyle: 'italic' },
+  ohlcvMeta: { color: '#444', fontSize: 11, marginTop: 8 },
+  mfeRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  mfeBox: { flex: 1, backgroundColor: '#052e16', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#22c55e33' },
+  maeBox: { flex: 1, backgroundColor: '#2d0a0a', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#ef444433' },
+  mfeLabel: { color: '#22c55e', fontSize: 11, fontWeight: '700', marginBottom: 4 },
+  maeLabel: { color: '#ef4444', fontSize: 11, fontWeight: '700', marginBottom: 4 },
+  mfeValue: { color: '#22c55e', fontSize: 20, fontWeight: '700' },
+  maeValue: { color: '#ef4444', fontSize: 20, fontWeight: '700' },
+  mfePrice: { color: '#666', fontSize: 12, marginTop: 2 },
+  mfeHint: { color: '#555', fontSize: 11, marginTop: 4 },
+  captureRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', borderRadius: 8, padding: 10 },
+  captureLabel: { color: '#666', fontSize: 13, flex: 1 },
+  captureValue: { fontSize: 16, fontWeight: '700' },
+  captureHint: { color: '#555', fontSize: 12 },
 })
