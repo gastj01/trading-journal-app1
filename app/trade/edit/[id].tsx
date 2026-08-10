@@ -13,6 +13,7 @@ export default function EditTradeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [accountBalance, setAccountBalance] = useState(0)
   const [trade, setTrade] = useState<Trade | null>(null)
   const [tags, setTags] = useState<TagDefinition[]>([])
   const [strategies, setStrategies] = useState<StrategyProfile[]>([])
@@ -53,6 +54,11 @@ export default function EditTradeScreen() {
       ])
       if (!data) return
       setTrade(data)
+      // Load account balance for live risk calculation
+      if (data.account_id) {
+        const { data: acc } = await supabase.from('trading_accounts').select('initial_balance').eq('id', data.account_id).single()
+        if (acc) setAccountBalance(acc.initial_balance)
+      }
       setTags(tagDefs ?? [])
       setStrategies(strats ?? [])
       setStratTagLinks(links ?? [])
@@ -115,6 +121,21 @@ export default function EditTradeScreen() {
 
   function update(key: keyof typeof form, value: string) {
     setForm(f => ({ ...f, [key]: value }))
+  }
+
+  function updateCalc(key: 'entry_price' | 'stop_loss' | 'risk_percent' | 'position_size', value: string) {
+    setForm(f => {
+      const next = { ...f, [key]: value }
+      if (!next.position_size || accountBalance <= 0) return next
+      const entry = parseFloat(next.entry_price) || 0
+      const sl = parseFloat(next.stop_loss) || 0
+      const riskPerUnit = Math.abs(entry - sl)
+      const posSize = parseFloat(next.position_size) || 0
+      if (posSize > 0 && riskPerUnit > 0) {
+        next.risk_percent = ((posSize * riskPerUnit / accountBalance) * 100).toFixed(2)
+      }
+      return next
+    })
   }
 
   function selectStrategy(stratId: string) {
@@ -315,27 +336,48 @@ export default function EditTradeScreen() {
         <View style={s.row2}>
           <View style={{ flex: 1 }}>
             <Text style={s.label}>Entry</Text>
-            <TextInput style={s.input} placeholderTextColor="#555" value={form.entry_price} onChangeText={v => update('entry_price', v)} keyboardType="decimal-pad" />
+            <TextInput style={s.input} placeholderTextColor="#555" value={form.entry_price} onChangeText={v => updateCalc('entry_price', v)} keyboardType="decimal-pad" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.label}>Stop Loss</Text>
-            <TextInput style={s.input} placeholderTextColor="#555" value={form.stop_loss} onChangeText={v => update('stop_loss', v)} keyboardType="decimal-pad" />
+            <TextInput style={s.input} placeholderTextColor="#555" value={form.stop_loss} onChangeText={v => updateCalc('stop_loss', v)} keyboardType="decimal-pad" />
           </View>
         </View>
 
         <Text style={s.label}>Exit (optional)</Text>
         <TextInput style={s.input} placeholderTextColor="#555" value={form.exit_price} onChangeText={v => update('exit_price', v)} keyboardType="decimal-pad" />
 
-        <View style={s.row2}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.label}>Risiko %</Text>
-            <TextInput style={s.input} placeholderTextColor="#555" value={form.risk_percent} onChangeText={v => update('risk_percent', v)} keyboardType="decimal-pad" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.label}>Positionsgrösse</Text>
-            <TextInput style={s.input} placeholderTextColor="#555" value={form.position_size} onChangeText={v => update('position_size', v)} keyboardType="decimal-pad" />
-          </View>
-        </View>
+        {(() => {
+          const calcEntry = parseFloat(form.entry_price) || 0
+          const calcSL = parseFloat(form.stop_loss) || 0
+          const calcRiskPct = parseFloat(form.risk_percent) || 0
+          const calcRiskPerUnit = Math.abs(calcEntry - calcSL)
+          const calcRiskAmount = accountBalance > 0 ? (accountBalance * calcRiskPct) / 100 : 0
+          const calcAutoPos = calcRiskPerUnit > 0 && calcRiskAmount > 0 ? calcRiskAmount / calcRiskPerUnit : 0
+          const isManualPos = !!form.position_size
+          return (
+            <>
+              <View style={s.row2}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.label}>Risiko %</Text>
+                  <TextInput style={s.input} placeholderTextColor="#555" value={form.risk_percent} onChangeText={v => updateCalc('risk_percent', v)} keyboardType="decimal-pad" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.label}>Positionsgrösse</Text>
+                  <TextInput style={s.input} placeholderTextColor="#555" value={form.position_size} onChangeText={v => updateCalc('position_size', v)} keyboardType="decimal-pad" placeholder={calcAutoPos > 0 ? calcAutoPos.toFixed(4) : 'auto'} />
+                </View>
+              </View>
+              {(calcRiskAmount > 0 || calcAutoPos > 0) && (
+                <View style={s.calcRow}>
+                  <Text style={s.calcText}>Risiko $: {calcRiskAmount.toFixed(2)}</Text>
+                  {!isManualPos && calcAutoPos > 0 && (
+                    <Text style={s.calcTextMuted}>Pos (auto): {calcAutoPos.toFixed(4)}</Text>
+                  )}
+                </View>
+              )}
+            </>
+          )
+        })()}
 
         {strategies.length > 0 && (
           <>
@@ -515,6 +557,9 @@ const s = StyleSheet.create({
   screenshotTextDone: { color: '#22c55e' },
   removeScreenshot: { marginTop: 6, alignSelf: 'flex-start' },
   removeScreenshotText: { color: '#ef4444', fontSize: 12 },
+  calcRow: { flexDirection: 'row', gap: 16, paddingHorizontal: 2, marginTop: 4 },
+  calcText: { color: '#22c55e', fontSize: 12, fontWeight: '600' },
+  calcTextMuted: { color: '#555', fontSize: 12 },
   // Checklist
   checklistSection: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#2a2a2a' },
   checklistSectionTitle: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 8 },

@@ -75,6 +75,24 @@ export default function NewTradeScreen() {
     setForm(f => ({ ...f, [key]: value }))
   }
 
+  function updateCalc(key: 'entry_price' | 'stop_loss' | 'risk_percent' | 'position_size', value: string) {
+    setForm(f => {
+      const next = { ...f, [key]: value }
+      if (!next.position_size) return next
+      const acc = accounts.find(a => a.id === f.account_id)
+      const balance = acc?.initial_balance ?? 0
+      if (balance <= 0) return next
+      const entry = parseFloat(next.entry_price) || 0
+      const sl = parseFloat(next.stop_loss) || 0
+      const riskPerUnit = Math.abs(entry - sl)
+      const posSize = parseFloat(next.position_size) || 0
+      if (posSize > 0 && riskPerUnit > 0) {
+        next.risk_percent = ((posSize * riskPerUnit / balance) * 100).toFixed(2)
+      }
+      return next
+    })
+  }
+
   function selectStrategy(stratId: string) {
     setForm(f => ({ ...f, strategy_id: stratId }))
     const strat = strategies.find(s => s.id === stratId)
@@ -169,6 +187,17 @@ export default function NewTradeScreen() {
 
   const selectedStrategy = strategies.find(s => s.id === form.strategy_id)
 
+  // Live calculation
+  const selectedAcc = accounts.find(a => a.id === form.account_id)
+  const calcBalance = selectedAcc?.initial_balance ?? 0
+  const calcEntry = parseFloat(form.entry_price) || 0
+  const calcSL = parseFloat(form.stop_loss) || 0
+  const calcRiskPct = parseFloat(form.risk_percent) || 0
+  const calcRiskPerUnit = Math.abs(calcEntry - calcSL)
+  const calcRiskAmount = calcBalance > 0 ? (calcBalance * calcRiskPct) / 100 : 0
+  const calcAutoPos = calcRiskPerUnit > 0 && calcRiskAmount > 0 ? calcRiskAmount / calcRiskPerUnit : 0
+  const isManualPos = !!form.position_size
+
   // Compute filtered tags based on selected strategy
   const linkedTagIds = stratTagLinks
     .filter(l => l.strategy_id === form.strategy_id)
@@ -234,24 +263,32 @@ export default function NewTradeScreen() {
         <View style={s.row2}>
           <View style={{ flex: 1 }}>
             <Label text="Entry" />
-            <Input value={form.entry_price} onChangeText={v => update('entry_price', v)} keyboardType="decimal-pad" />
+            <Input value={form.entry_price} onChangeText={v => updateCalc('entry_price', v)} keyboardType="decimal-pad" />
           </View>
           <View style={{ flex: 1 }}>
             <Label text="Stop Loss" />
-            <Input value={form.stop_loss} onChangeText={v => update('stop_loss', v)} keyboardType="decimal-pad" />
+            <Input value={form.stop_loss} onChangeText={v => updateCalc('stop_loss', v)} keyboardType="decimal-pad" />
           </View>
         </View>
 
         <View style={s.row2}>
           <View style={{ flex: 1 }}>
             <Label text="Risiko %" />
-            <Input value={form.risk_percent} onChangeText={v => update('risk_percent', v)} keyboardType="decimal-pad" />
+            <Input value={form.risk_percent} onChangeText={v => updateCalc('risk_percent', v)} keyboardType="decimal-pad" />
           </View>
           <View style={{ flex: 1 }}>
             <Label text="Positionsgrösse (opt.)" />
-            <Input value={form.position_size} onChangeText={v => update('position_size', v)} keyboardType="decimal-pad" placeholder="auto" />
+            <Input value={form.position_size} onChangeText={v => updateCalc('position_size', v)} keyboardType="decimal-pad" placeholder={calcAutoPos > 0 ? calcAutoPos.toFixed(4) : 'auto'} />
           </View>
         </View>
+        {(calcRiskAmount > 0 || calcAutoPos > 0) && (
+          <View style={s.calcRow}>
+            <Text style={s.calcText}>Risiko $: {calcRiskAmount.toFixed(2)}</Text>
+            {!isManualPos && calcAutoPos > 0 && (
+              <Text style={s.calcTextMuted}>Pos (auto): {calcAutoPos.toFixed(4)}</Text>
+            )}
+          </View>
+        )}
 
         {strategies.length > 0 && (
           <>
@@ -421,6 +458,9 @@ const s = StyleSheet.create({
   tagChipActive: { backgroundColor: '#1a2a3a', borderColor: '#3b82f6' },
   tagChipText: { color: '#888', fontSize: 13 },
   tagChipTextActive: { color: '#60a5fa' },
+  calcRow: { flexDirection: 'row', gap: 16, paddingHorizontal: 2, marginTop: 4 },
+  calcText: { color: '#22c55e', fontSize: 12, fontWeight: '600' },
+  calcTextMuted: { color: '#555', fontSize: 12 },
   // Checklist
   checklistSection: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#2a2a2a' },
   checklistSectionTitle: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 8 },

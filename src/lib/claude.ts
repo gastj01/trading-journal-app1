@@ -1,11 +1,25 @@
-import type { Trade, TagDefinition, StrategyProfile } from '../types'
+import type { Trade, TagDefinition, StrategyProfile, ManagementEvent } from '../types'
 import type { MFEMAEResult } from './binance'
+
+const EVENT_LABELS_DE: Record<string, string> = {
+  sl_moved_to_be: 'SL → Break Even',
+  sl_moved_manual: 'SL verschoben',
+  partial_close: 'Teilverkauf',
+  tp_hit: 'TP getroffen',
+  manual_exit: 'Manueller Exit',
+  sl_hit: 'SL getroffen',
+  note: 'Notiz',
+  limit_placed: 'Limit gesetzt',
+  limit_filled: 'Limit gefüllt',
+  tp_moved_manual: 'TP verschoben',
+}
 
 export function buildAnalysisPrompt(
   trade: Trade,
   tags: TagDefinition[],
   ohlcv: MFEMAEResult | null,
   strategy?: StrategyProfile | null,
+  events?: ManagementEvent[],
 ): string {
   const risk = Math.abs(trade.entry_price - trade.stop_loss)
   const rMultiple = trade.exit_price && risk > 0
@@ -26,15 +40,30 @@ export function buildAnalysisPrompt(
     ? `\nSTRATEGIE-PROFIL: "${strategy.name}"\n${strategy.description}\n`
     : ''
 
-  return `Du bist ein erfahrener Trading-Coach. Analysiere diesen Trade objektiv und präzise auf Deutsch.${strategySection ? ' Vergleiche den Trade mit den Strategie-Regeln und weise auf Abweichungen hin.' : ''}
+  const managementSection = events && events.length > 0
+    ? `\nTRADE-MANAGEMENT (Verlauf):\n${events.map(ev => {
+        const time = new Date(ev.event_time).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+        const label = EVENT_LABELS_DE[ev.event_type] ?? ev.event_type
+        const price = ev.price ? ` @ ${ev.price}` : ''
+        const size = ev.size_percent ? ` (${ev.size_percent}%)` : ''
+        const note = ev.note ? ` — ${ev.note}` : ''
+        return `- ${time}: ${label}${price}${size}${note}`
+      }).join('\n')}\n`
+    : ''
+
+  const hasManagement = !!managementSection
+  const hasStrategy = !!strategy?.description
+
+  return `Du bist ein erfahrener Trading-Coach. Analysiere diesen Trade objektiv und präzise auf Deutsch.${hasStrategy ? ' Vergleiche den Trade mit den Strategie-Regeln und weise auf Abweichungen hin.' : ''}${hasManagement ? ' Bewerte auch das Trade-Management (SL-Verschiebungen, Teilverkäufe, Exits).' : ''}
 
 ${strategySection}TRADE-DATEN:
 Symbol: ${trade.symbol} | Seite: ${trade.side.toUpperCase()} | Timeframe: ${trade.timeframe ?? '—'}
 Entry: ${trade.entry_price} | Stop Loss: ${trade.stop_loss} | Risiko: ${risk.toFixed(4)} (${trade.risk_percent}%)
+Positionsgrösse: ${trade.position_size ?? '—'}
 ${exitSection}
 Status: ${trade.status}
 Datenqualität: ${trade.trade_data_quality ?? 'nicht angegeben'}
-
+${managementSection}
 OHLCV-ANALYSE (Binance):
 ${mfeSection}
 
@@ -48,7 +77,7 @@ Gib eine strukturierte Analyse mit diesen Punkten:
 1. **Entry-Qualität** — War der Entry gut gewählt? (MAE als Hinweis auf Timing)
 2. **Stop Loss** — War der SL sinnvoll platziert?
 3. **Exit-Timing** — Wurde das Potential ausgeschöpft? (MFE vs. tatsächlicher Exit)
-${strategy?.description ? '4. **Strategie-Regelkonformität** — Welche Regeln wurden befolgt, welche verletzt?\n5. **Fehler & Muster** — Was lief falsch, was gut?\n6. **Verbesserung** — Eine konkrete Empfehlung für den nächsten Trade dieser Art' : '4. **Fehler & Muster** — Was lief falsch, was gut?\n5. **Verbesserung** — Eine konkrete Empfehlung für den nächsten Trade dieser Art'}
+${hasManagement ? '4. **Trade-Management** — War SL-Verschiebung/Teilverkauf sinnvoll und zum richtigen Zeitpunkt?\n' : ''}${hasStrategy ? `${hasManagement ? '5' : '4'}. **Strategie-Regelkonformität** — Welche Regeln wurden befolgt, welche verletzt?\n${hasManagement ? '6' : '5'}. **Fehler & Muster** — Was lief falsch, was gut?\n${hasManagement ? '7' : '6'}. **Verbesserung** — Eine konkrete Empfehlung für den nächsten Trade dieser Art` : `${hasManagement ? '5' : '4'}. **Fehler & Muster** — Was lief falsch, was gut?\n${hasManagement ? '6' : '5'}. **Verbesserung** — Eine konkrete Empfehlung für den nächsten Trade dieser Art`}
 
 Halte dich kurz und direkt. Kein Intro, keine Zusammenfassung am Ende.`
 }
@@ -60,8 +89,9 @@ export async function analyzeTradeWithClaude(
   ohlcv: MFEMAEResult | null,
   strategy?: StrategyProfile | null,
   customPrompt?: string,
+  events?: ManagementEvent[],
 ): Promise<string> {
-  const prompt = customPrompt ?? buildAnalysisPrompt(trade, tags, ohlcv, strategy)
+  const prompt = customPrompt ?? buildAnalysisPrompt(trade, tags, ohlcv, strategy, events)
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',

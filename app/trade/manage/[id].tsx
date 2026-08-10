@@ -78,6 +78,7 @@ export default function ManageTradeScreen() {
   const router = useRouter()
   const [trade, setTrade] = useState<Trade | null>(null)
   const [events, setEvents] = useState<ManagementEvent[]>([])
+  const [accountBalance, setAccountBalance] = useState(0)
   const [activeAction, setActiveAction] = useState<ActionDef | null>(null)
   const [price, setPrice] = useState('')
   const [sizePercent, setSizePercent] = useState('')
@@ -89,8 +90,11 @@ export default function ManageTradeScreen() {
       supabase.from('trades').select('*').eq('id', id).single(),
       supabase.from('trade_management_events').select('*').eq('trade_id', id).order('event_time', { ascending: false }),
     ])
-    if (t) setTrade(t)
     setEvents(ev ?? [])
+    if (!t) return
+    setTrade(t)
+    const { data: acc } = await supabase.from('trading_accounts').select('initial_balance').eq('id', t.account_id).single()
+    if (acc) setAccountBalance(acc.initial_balance)
   }, [id])
 
   useEffect(() => {
@@ -175,6 +179,23 @@ export default function ManageTradeScreen() {
   const stopLoss = trade.stop_loss
   const risk = Math.abs(entryPrice - stopLoss)
 
+  // Derive current state from management events (events sorted desc, process asc)
+  const eventsAsc = [...events].reverse()
+  let currentSL = trade.stop_loss
+  let remainingFraction = 1.0
+  for (const ev of eventsAsc) {
+    if (ev.event_type === 'sl_moved_to_be') currentSL = trade.entry_price
+    if (ev.event_type === 'sl_moved_manual') currentSL = ev.price
+    if ((ev.event_type === 'partial_close' || ev.event_type === 'tp_hit') && ev.size_percent) {
+      remainingFraction *= (1 - ev.size_percent / 100)
+    }
+  }
+  const remainingSize = (trade.position_size ?? 0) * remainingFraction
+  const currentRiskPerUnit = Math.abs(trade.entry_price - currentSL)
+  const currentRiskAmount = remainingSize * currentRiskPerUnit
+  const currentRiskPct = accountBalance > 0 ? (currentRiskAmount / accountBalance) * 100 : 0
+  const atBreakEven = currentSL === trade.entry_price
+
   function calcR(eventPrice: number) {
     if (risk === 0) return null
     const r = isLong
@@ -210,6 +231,35 @@ export default function ManageTradeScreen() {
       </View>
 
       <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+        <View style={[s.riskCard, atBreakEven && s.riskCardBE]}>
+          <View style={s.riskRow}>
+            <View style={s.riskItem}>
+              <Text style={s.riskLabel}>Aktueller SL</Text>
+              <Text style={[s.riskValue, atBreakEven && s.riskValueBE]}>{currentSL.toLocaleString()}</Text>
+            </View>
+            <View style={s.riskItem}>
+              <Text style={s.riskLabel}>Restgrösse</Text>
+              <Text style={s.riskValue}>{remainingSize.toFixed(4)} ({(remainingFraction * 100).toFixed(0)}%)</Text>
+            </View>
+          </View>
+          {atBreakEven ? (
+            <Text style={s.beBadge}>Break Even — Kein Risiko</Text>
+          ) : (
+            <View style={s.riskRow}>
+              <View style={s.riskItem}>
+                <Text style={s.riskLabel}>Risiko $</Text>
+                <Text style={s.riskValueRed}>{currentRiskAmount.toFixed(2)}</Text>
+              </View>
+              {currentRiskPct > 0 && (
+                <View style={s.riskItem}>
+                  <Text style={s.riskLabel}>Risiko %</Text>
+                  <Text style={s.riskValueRed}>{currentRiskPct.toFixed(2)}%</Text>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+
         <Text style={s.sectionTitle}>Schnellaktionen</Text>
         <View style={s.actionGrid}>
           {ACTIONS.map(action => (
@@ -337,6 +387,15 @@ const s = StyleSheet.create({
   metaSep: { color: '#444', fontSize: 11 },
   scroll: { flex: 1 },
   content: { padding: 16, paddingBottom: 40 },
+  riskCard: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#2a2a2a', gap: 10 },
+  riskCardBE: { borderColor: '#22c55e33', backgroundColor: '#0a1f0f' },
+  riskRow: { flexDirection: 'row', gap: 24 },
+  riskItem: { gap: 2 },
+  riskLabel: { color: '#555', fontSize: 11, fontWeight: '600', textTransform: 'uppercase' },
+  riskValue: { color: '#ccc', fontSize: 14, fontWeight: '600' },
+  riskValueBE: { color: '#22c55e' },
+  riskValueRed: { color: '#ef4444', fontSize: 14, fontWeight: '700' },
+  beBadge: { color: '#22c55e', fontSize: 13, fontWeight: '700' },
   sectionTitle: { color: '#555', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 },
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   actionBtn: { width: '47%', backgroundColor: '#1a1a1a', borderRadius: 12, padding: 16, alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#2a2a2a' },

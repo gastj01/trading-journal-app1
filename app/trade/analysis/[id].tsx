@@ -8,7 +8,7 @@ import { supabase } from '../../../src/lib/supabase'
 import { fetchCandles, calcMFEMAE, normalizeSymbol, normalizeInterval } from '../../../src/lib/binance'
 import { analyzeTradeWithClaude, buildAnalysisPrompt } from '../../../src/lib/claude'
 import { ANTHROPIC_KEY } from '../../(tabs)/settings'
-import type { Trade, TagDefinition, StrategyProfile } from '../../../src/types'
+import type { Trade, TagDefinition, StrategyProfile, ManagementEvent } from '../../../src/types'
 import type { MFEMAEResult } from '../../../src/lib/binance'
 
 type Phase = 'loading' | 'prompt' | 'analyzing' | 'result' | 'error'
@@ -20,6 +20,7 @@ export default function TradeAnalysisScreen() {
   const [tags, setTags] = useState<TagDefinition[]>([])
   const [strategy, setStrategy] = useState<StrategyProfile | null>(null)
   const [ohlcv, setOhlcv] = useState<MFEMAEResult | null>(null)
+  const [events, setEvents] = useState<ManagementEvent[]>([])
   const [analysis, setAnalysis] = useState<string | null>(null)
   const [phase, setPhase] = useState<Phase>('loading')
   const [status, setStatus] = useState('Lade Trade...')
@@ -29,11 +30,14 @@ export default function TradeAnalysisScreen() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: t }, { data: tagAssign }, key] = await Promise.all([
+      const [{ data: t }, { data: tagAssign }, key, { data: evData }] = await Promise.all([
         supabase.from('trades').select('*').eq('id', id).single(),
         supabase.from('trade_tag_assignments').select('*, tag:trade_tag_definitions(*)').eq('trade_id', id),
         AsyncStorage.getItem(ANTHROPIC_KEY),
+        supabase.from('trade_management_events').select('*').eq('trade_id', id).order('event_time', { ascending: true }),
       ])
+      const loadedEvents: ManagementEvent[] = evData ?? []
+      setEvents(loadedEvents)
       if (!t) return
       setTrade(t)
       const loadedTags = (tagAssign ?? []).map((a: any) => a.tag).filter(Boolean)
@@ -68,7 +72,7 @@ export default function TradeAnalysisScreen() {
       }
 
       // Build default prompt and show editor
-      const generated = buildAnalysisPrompt(t, loadedTags, loadedOhlcv, loadedStrategy)
+      const generated = buildAnalysisPrompt(t, loadedTags, loadedOhlcv, loadedStrategy, loadedEvents)
       setPromptText(generated)
       setStatus('')
       setPhase('prompt')
@@ -89,7 +93,7 @@ export default function TradeAnalysisScreen() {
     setAnalysis(null)
     setStatus('Claude analysiert...')
     try {
-      const result = await analyzeTradeWithClaude(key, trade, tags, ohlcv, strategy, promptText)
+      const result = await analyzeTradeWithClaude(key, trade, tags, ohlcv, strategy, promptText, events)
       setAnalysis(result)
       setPhase('result')
     } catch (e: any) {
