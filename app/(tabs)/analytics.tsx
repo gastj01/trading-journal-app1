@@ -5,7 +5,7 @@ import { Feather } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../src/lib/supabase'
 import { ANTHROPIC_KEY } from './settings'
-import type { Trade, TagDefinition, StrategyProfile } from '../../src/types'
+import type { Trade, TagDefinition, StrategyProfile, ManagementEvent } from '../../src/types'
 
 type Period = '7d' | '30d' | '90d' | 'all'
 
@@ -18,6 +18,7 @@ export default function AnalyticsScreen() {
   const [assignments, setAssignments] = useState<TagAssignment[]>([])
   const [period, setPeriod] = useState<Period>('30d')
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null)
+  const [managementEvents, setManagementEvents] = useState<ManagementEvent[]>([])
   const [kiAnalysis, setKiAnalysis] = useState<string | null>(null)
   const [kiLoading, setKiLoading] = useState(false)
   const [kiError, setKiError] = useState<string | null>(null)
@@ -26,16 +27,18 @@ export default function AnalyticsScreen() {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const [{ data: tradeData }, { data: asgn }, { data: tags }, { data: strats }] = await Promise.all([
+      const [{ data: tradeData }, { data: asgn }, { data: tags }, { data: strats }, { data: evData }] = await Promise.all([
         supabase.from('trades').select('*').eq('user_id', user.id).eq('status', 'closed').order('opened_at', { ascending: false }),
         supabase.from('trade_tag_assignments').select('tag_id, trade_id').eq('user_id', user.id),
         supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id),
         supabase.from('strategy_profiles').select('*').eq('user_id', user.id).order('name'),
+        supabase.from('trade_management_events').select('*').eq('user_id', user.id),
       ])
       setTrades(tradeData ?? [])
       setAssignments(asgn ?? [])
       setTagDefs(tags ?? [])
       setStrategies(strats ?? [])
+      setManagementEvents(evData ?? [])
     }
     load()
   }, [])
@@ -82,6 +85,51 @@ export default function AnalyticsScreen() {
       .sort((a, b) => b.total - a.total)
   }, [filtered, tagDefs, assignments])
 
+  const managementStats = useMemo(() => {
+    const tradeIds = new Set(filtered.map(t => t.id))
+    const relevantEvents = managementEvents.filter(ev => tradeIds.has(ev.trade_id))
+    const eventsByTrade = new Map<string, ManagementEvent[]>()
+    for (const ev of relevantEvents) {
+      if (!eventsByTrade.has(ev.trade_id)) eventsByTrade.set(ev.trade_id, [])
+      eventsByTrade.get(ev.trade_id)!.push(ev)
+    }
+
+    const managedTrades = filtered.filter(t => eventsByTrade.has(t.id))
+    const beMovedTrades = filtered.filter(t =>
+      (eventsByTrade.get(t.id) ?? []).some(ev => ev.event_type === 'sl_moved_to_be')
+    )
+    const beHitTrades = beMovedTrades.filter(t =>
+      (eventsByTrade.get(t.id) ?? []).some(ev => ev.event_type === 'sl_hit')
+    )
+    const tp1Trades = filtered.filter(t =>
+      (eventsByTrade.get(t.id) ?? []).some(ev => ev.event_type === 'tp_hit')
+    )
+    const partialTrades = filtered.filter(t =>
+      (eventsByTrade.get(t.id) ?? []).some(ev => ev.event_type === 'partial_close')
+    )
+
+    const tp1RValues: number[] = []
+    for (const trade of tp1Trades) {
+      const ev = (eventsByTrade.get(trade.id) ?? []).find(e => e.event_type === 'tp_hit')
+      if (ev?.price) {
+        const risk = Math.abs(trade.entry_price - trade.stop_loss)
+        const pnl = trade.side === 'long' ? ev.price - trade.entry_price : trade.entry_price - ev.price
+        if (risk > 0) tp1RValues.push(pnl / risk)
+      }
+    }
+    const avgTp1R = tp1RValues.length > 0 ? tp1RValues.reduce((a, b) => a + b, 0) / tp1RValues.length : null
+
+    return {
+      managedCount: managedTrades.length,
+      beMovedCount: beMovedTrades.length,
+      beHeldCount: beMovedTrades.length - beHitTrades.length,
+      tp1Count: tp1Trades.length,
+      partialCount: partialTrades.length,
+      avgTp1R,
+      hasData: managedTrades.length > 0,
+    }
+  }, [filtered, managementEvents])
+
   const stats = calcStats(filtered)
   const sessions = [
     { label: 'Asian', start: 0, end: 7, color: '#818cf8' },
@@ -121,6 +169,14 @@ export default function AnalyticsScreen() {
     const mistakeTags = tagStats.filter(ts => ts.tag.tag_type === 'mistake' && ts.total > 0)
       .map(ts => `  ${ts.tag.name.replace(/_/g, ' ')}: ${ts.total}× (Ø ${ts.avgR.toFixed(1)}R, ${ts.inLoss}× in Loss)`).join('\n')
 
+    const mgmtLines = managementStats.hasData
+      ? `\nMANAGEMENT-AUSWERTUNG (${managementStats.managedCount} gemanagte Trades):
+  SL → Break Even: ${managementStats.beMovedCount}× (${filtered.length > 0 ? ((managementStats.beMovedCount / filtered.length) * 100).toFixed(0) : 0}% der Trades)
+  BE gehalten: ${managementStats.beHeldCount}/${managementStats.beMovedCount} (${managementStats.beMovedCount > 0 ? ((managementStats.beHeldCount / managementStats.beMovedCount) * 100).toFixed(0) : 0}% Halterate)
+  TP1 getroffen: ${managementStats.tp1Count}×${managementStats.avgTp1R !== null ? ` (Ø ${managementStats.avgTp1R.toFixed(2)}R)` : ''}
+  Partial Close: ${managementStats.partialCount}×`
+      : ''
+
     const prompt = `Du bist ein erfahrener Trading-Coach. Bewerte diese Trading-Strategie objektiv auf Deutsch.
 
 STRATEGIE: "${activeStrategy.name}"
@@ -133,7 +189,7 @@ Total R: ${stats.totalR > 0 ? '+' : ''}${stats.totalR.toFixed(2)}R
 Profit Factor: ${stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)}
 Max Drawdown: ${stats.maxDD.toFixed(2)}R
 Wins: ${stats.wins} | Losses: ${stats.losses}
-
+${mgmtLines}
 SESSIONS (UTC):
 ${sessionLines}
 
@@ -148,7 +204,7 @@ Gib eine strukturierte Bewertung mit:
 2. **Performance-Einschätzung** — Ist die Strategie profitabel? Wo liegen Schwächen?
 3. **Beste Bedingungen** — Wann funktioniert die Strategie am besten (Session, Wochentag)?
 4. **Häufige Fehler** — Welche Fehler-Tags kosten am meisten R?
-5. **Verbesserungsvorschläge** — 3-5 konkrete, umsetzbare Empfehlungen
+${managementStats.hasData ? '5. **Management-Bewertung** — Wird BE-Verschiebung sinnvoll genutzt? Ist die TP1-Halterate gut?\n6. **Verbesserungsvorschläge** — 3-5 konkrete, umsetzbare Empfehlungen' : '5. **Verbesserungsvorschläge** — 3-5 konkrete, umsetzbare Empfehlungen'}
 
 Direkt und präzise. Kein Intro.`
 
@@ -329,6 +385,49 @@ Direkt und präzise. Kein Intro.`
             })}
           </View>
         )}
+        {managementStats.hasData && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>Management-Auswertung</Text>
+            <View style={s.mgmtGrid}>
+              <MgmtStat
+                label="Managed"
+                value={`${managementStats.managedCount}`}
+                sub={`von ${filtered.length} Trades`}
+              />
+              <MgmtStat
+                label="SL → BE"
+                value={`${managementStats.beMovedCount}`}
+                sub={filtered.length > 0 ? `${((managementStats.beMovedCount / filtered.length) * 100).toFixed(0)}% der Trades` : '—'}
+              />
+              <MgmtStat
+                label="BE gehalten"
+                value={managementStats.beMovedCount > 0 ? `${managementStats.beHeldCount}/${managementStats.beMovedCount}` : '—'}
+                sub={managementStats.beMovedCount > 0 ? `${((managementStats.beHeldCount / managementStats.beMovedCount) * 100).toFixed(0)}% Halterate` : ''}
+                positive={managementStats.beMovedCount > 0 && managementStats.beHeldCount / managementStats.beMovedCount >= 0.6}
+              />
+              <MgmtStat
+                label="TP1 getroffen"
+                value={`${managementStats.tp1Count}`}
+                sub={managementStats.avgTp1R !== null ? `Ø ${managementStats.avgTp1R.toFixed(2)}R` : `${filtered.length > 0 ? ((managementStats.tp1Count / filtered.length) * 100).toFixed(0) : 0}%`}
+                positive={managementStats.tp1Count > 0}
+              />
+              <MgmtStat
+                label="Partial Close"
+                value={`${managementStats.partialCount}`}
+                sub={filtered.length > 0 ? `${((managementStats.partialCount / filtered.length) * 100).toFixed(0)}% der Trades` : '—'}
+              />
+              {managementStats.avgTp1R !== null && (
+                <MgmtStat
+                  label="Ø TP1 in R"
+                  value={`${managementStats.avgTp1R > 0 ? '+' : ''}${managementStats.avgTp1R.toFixed(2)}R`}
+                  sub="bei TP-Hit"
+                  positive={managementStats.avgTp1R > 0}
+                />
+              )}
+            </View>
+          </View>
+        )}
+
         {activeStrategy && (
           <View style={s.section}>
             <TouchableOpacity style={s.kiBtn} onPress={runStrategyKI} disabled={kiLoading}>
@@ -392,6 +491,16 @@ function BigStat({ label, value, positive }: { label: string; value: string; pos
     <View style={s.bigStat}>
       <Text style={s.bigLabel}>{label}</Text>
       <Text style={[s.bigValue, positive === true && s.green, positive === false && s.red]}>{value}</Text>
+    </View>
+  )
+}
+
+function MgmtStat({ label, value, sub, positive }: { label: string; value: string; sub?: string; positive?: boolean }) {
+  return (
+    <View style={s.mgmtStat}>
+      <Text style={s.mgmtLabel}>{label}</Text>
+      <Text style={[s.mgmtValue, positive === true && s.green, positive === false && s.red]}>{value}</Text>
+      {sub ? <Text style={s.mgmtSub}>{sub}</Text> : null}
     </View>
   )
 }
@@ -463,6 +572,11 @@ const s = StyleSheet.create({
   tagBarWin: { backgroundColor: '#22c55e' },
   tagBarLoss: { backgroundColor: '#ef4444' },
   tagStatR: { fontSize: 13, fontWeight: '700', width: 44, textAlign: 'right' },
+  mgmtGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  mgmtStat: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, minWidth: '30%', flex: 1 },
+  mgmtLabel: { color: '#555', fontSize: 10, fontWeight: '600', textTransform: 'uppercase', marginBottom: 4 },
+  mgmtValue: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 2 },
+  mgmtSub: { color: '#555', fontSize: 11 },
   green: { color: '#22c55e' },
   red: { color: '#ef4444' },
   kiBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1a1a2d', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#818cf833' },
