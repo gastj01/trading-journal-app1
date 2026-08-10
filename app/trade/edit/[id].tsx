@@ -35,6 +35,7 @@ export default function EditTradeScreen() {
     screenshot_path: '',
     strategy_id: '',
     trade_data_quality: 'live' as string,
+    position_size: '',
   })
 
   useEffect(() => {
@@ -71,6 +72,7 @@ export default function EditTradeScreen() {
         screenshot_path: data.screenshot_path ?? '',
         strategy_id: stratId,
         trade_data_quality: data.trade_data_quality ?? 'live',
+        position_size: data.position_size != null ? String(data.position_size) : '',
       })
       if (stratId) {
         const strat = (strats ?? []).find((s: StrategyProfile) => s.id === stratId)
@@ -206,6 +208,7 @@ export default function EditTradeScreen() {
       notes: form.notes,
       screenshot_path: form.screenshot_path || null,
       trade_data_quality: form.trade_data_quality,
+      position_size: form.position_size ? parseFloat(form.position_size) : undefined,
       strategy_id: form.strategy_id || null,
       closed_at: form.status === 'closed' ? (trade?.closed_at ?? new Date().toISOString()) : null,
     }).eq('id', id)
@@ -323,8 +326,16 @@ export default function EditTradeScreen() {
         <Text style={s.label}>Exit (optional)</Text>
         <TextInput style={s.input} placeholderTextColor="#555" value={form.exit_price} onChangeText={v => update('exit_price', v)} keyboardType="decimal-pad" />
 
-        <Text style={s.label}>Risiko %</Text>
-        <TextInput style={s.input} placeholderTextColor="#555" value={form.risk_percent} onChangeText={v => update('risk_percent', v)} keyboardType="decimal-pad" />
+        <View style={s.row2}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.label}>Risiko %</Text>
+            <TextInput style={s.input} placeholderTextColor="#555" value={form.risk_percent} onChangeText={v => update('risk_percent', v)} keyboardType="decimal-pad" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.label}>Positionsgrösse</Text>
+            <TextInput style={s.input} placeholderTextColor="#555" value={form.position_size} onChangeText={v => update('position_size', v)} keyboardType="decimal-pad" />
+          </View>
+        </View>
 
         {strategies.length > 0 && (
           <>

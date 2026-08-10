@@ -31,6 +31,7 @@ export default function NewTradeScreen() {
     setup: '',
     notes: '',
     trade_data_quality: 'live' as string,
+    position_size: '',
   })
 
   useEffect(() => {
@@ -110,7 +111,9 @@ export default function NewTradeScreen() {
     const acc = accounts.find(a => a.id === form.account_id)
     const riskAmount = acc ? (acc.initial_balance * riskPct) / 100 : 0
     const riskPerUnit = Math.abs(entry - sl)
-    const posSize = riskPerUnit > 0 ? riskAmount / riskPerUnit : 0
+    const posSize = form.position_size
+      ? parseFloat(form.position_size)
+      : riskPerUnit > 0 ? riskAmount / riskPerUnit : 0
 
     setSaving(true)
     const { data: tradeData, error } = await supabase.from('trades').insert({
@@ -239,8 +242,16 @@ export default function NewTradeScreen() {
           </View>
         </View>
 
-        <Label text="Risiko %" />
-        <Input value={form.risk_percent} onChangeText={v => update('risk_percent', v)} keyboardType="decimal-pad" />
+        <View style={s.row2}>
+          <View style={{ flex: 1 }}>
+            <Label text="Risiko %" />
+            <Input value={form.risk_percent} onChangeText={v => update('risk_percent', v)} keyboardType="decimal-pad" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Label text="Positionsgrösse (opt.)" />
+            <Input value={form.position_size} onChangeText={v => update('position_size', v)} keyboardType="decimal-pad" placeholder="auto" />
+          </View>
+        </View>
 
         {strategies.length > 0 && (
           <>
