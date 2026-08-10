@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback } from 'react'
-import { View, Text, FlatList, TouchableOpacity, TextInput, StyleSheet } from 'react-native'
+import { useState, useCallback } from 'react'
+import { View, Text, FlatList, TouchableOpacity, TextInput, ScrollView, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
+import { useFocusEffect } from '@react-navigation/native'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
-import type { Trade } from '../../src/types'
+import type { Trade, StrategyProfile, TagDefinition } from '../../src/types'
 
 type FilterStatus = 'all' | 'open' | 'closed'
 type FilterSide = 'all' | 'long' | 'short'
@@ -13,36 +14,90 @@ export default function JournalScreen() {
   const router = useRouter()
   const [trades, setTrades] = useState<Trade[]>([])
   const [filtered, setFiltered] = useState<Trade[]>([])
+  const [strategies, setStrategies] = useState<StrategyProfile[]>([])
+  const [tags, setTags] = useState<TagDefinition[]>([])
+  const [tagAssignments, setTagAssignments] = useState<{ trade_id: string; tag_id: string }[]>([])
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<FilterStatus>('all')
   const [side, setSide] = useState<FilterSide>('all')
+  const [selectedStrategyId, setSelectedStrategyId] = useState('')
+  const [selectedTagId, setSelectedTagId] = useState('')
   const [loading, setLoading] = useState(true)
+
+  useFocusEffect(useCallback(() => {
+    load()
+  }, []))
 
   async function load() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const { data } = await supabase
-      .from('trades')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('opened_at', { ascending: false })
-    setTrades(data ?? [])
+    const [{ data: tradeData }, { data: strats }, { data: tagDefs }, { data: assigns }] = await Promise.all([
+      supabase.from('trades').select('*').eq('user_id', user.id).order('opened_at', { ascending: false }),
+      supabase.from('strategy_profiles').select('*').eq('user_id', user.id).order('name'),
+      supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id).order('tag_type'),
+      supabase.from('trade_tag_assignments').select('trade_id, tag_id').eq('user_id', user.id),
+    ])
+    const loadedTrades = tradeData ?? []
+    setTrades(loadedTrades)
+    setStrategies(strats ?? [])
+    setTags(tagDefs ?? [])
+    setTagAssignments(assigns ?? [])
+    applyFilters(loadedTrades, assigns ?? [], search, status, side, selectedStrategyId, selectedTagId)
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
-
-  useEffect(() => {
-    let result = trades
-    if (status !== 'all') result = result.filter(t => t.status === status)
-    if (side !== 'all') result = result.filter(t => t.side === side)
-    if (search) result = result.filter(t =>
-      t.symbol.toLowerCase().includes(search.toLowerCase()) ||
-      t.setup?.toLowerCase().includes(search.toLowerCase()) ||
-      t.notes?.toLowerCase().includes(search.toLowerCase())
-    )
+  function applyFilters(
+    allTrades: Trade[],
+    assigns: { trade_id: string; tag_id: string }[],
+    q: string,
+    st: FilterStatus,
+    si: FilterSide,
+    stratId: string,
+    tagId: string,
+  ) {
+    let result = allTrades
+    if (st !== 'all') result = result.filter(t => t.status === st)
+    if (si !== 'all') result = result.filter(t => t.side === si)
+    if (stratId) result = result.filter(t => t.strategy_id === stratId)
+    if (tagId) {
+      const tradeIdsWithTag = new Set(assigns.filter(a => a.tag_id === tagId).map(a => a.trade_id))
+      result = result.filter(t => tradeIdsWithTag.has(t.id))
+    }
+    if (q) {
+      const lower = q.toLowerCase()
+      result = result.filter(t =>
+        t.symbol.toLowerCase().includes(lower) ||
+        t.setup?.toLowerCase().includes(lower) ||
+        t.notes?.toLowerCase().includes(lower)
+      )
+    }
     setFiltered(result)
-  }, [trades, search, status, side])
+  }
+
+  function setFilter<T>(setter: (v: T) => void, key: 'status' | 'side' | 'strategy' | 'tag', value: T) {
+    let st = status, si = side, stratId = selectedStrategyId, tagId = selectedTagId, q = search
+    if (key === 'status') { setter(value); st = value as any }
+    if (key === 'side') { setter(value); si = value as any }
+    if (key === 'strategy') { setter(value); stratId = value as any }
+    if (key === 'tag') { setter(value); tagId = value as any }
+    applyFilters(trades, tagAssignments, q, st as FilterStatus, si as FilterSide, stratId as string, tagId as string)
+  }
+
+  function onSearch(q: string) {
+    setSearch(q)
+    applyFilters(trades, tagAssignments, q, status, side, selectedStrategyId, selectedTagId)
+  }
+
+  const hasActiveFilter = status !== 'all' || side !== 'all' || !!selectedStrategyId || !!selectedTagId || !!search
+
+  function resetAll() {
+    setSearch('')
+    setStatus('all')
+    setSide('all')
+    setSelectedStrategyId('')
+    setSelectedTagId('')
+    setFiltered(trades)
+  }
 
   const renderItem = useCallback(({ item }: { item: Trade }) => (
     <TradeItem trade={item} onPress={() => router.push(`/trade/${item.id}`)} />
@@ -58,34 +113,63 @@ export default function JournalScreen() {
           placeholder="Symbol, Setup, Notiz..."
           placeholderTextColor="#555"
           value={search}
-          onChangeText={setSearch}
+          onChangeText={onSearch}
         />
+        {hasActiveFilter && (
+          <TouchableOpacity onPress={resetAll} style={s.clearBtn}>
+            <Feather name="x" size={16} color="#666" />
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* Filters */}
-      <View style={s.filters}>
-        <View style={s.filterGroup}>
-          {(['all', 'open', 'closed'] as FilterStatus[]).map(f => (
-            <TouchableOpacity key={f} style={[s.chip, status === f && s.chipActive]} onPress={() => setStatus(f)}>
-              <Text style={[s.chipText, status === f && s.chipTextActive]}>
-                {f === 'all' ? 'Alle' : f === 'open' ? 'Offen' : 'Geschlossen'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <View style={s.filterGroup}>
-          {(['all', 'long', 'short'] as FilterSide[]).map(f => (
-            <TouchableOpacity key={f} style={[s.chip, side === f && s.chipActive]} onPress={() => setSide(f)}>
-              <Text style={[s.chipText, side === f && s.chipTextActive]}>
-                {f === 'all' ? 'Alle' : f === 'long' ? 'Long' : 'Short'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+      {/* Status + Side filters */}
+      <View style={s.filterRow}>
+        {(['all', 'open', 'closed'] as FilterStatus[]).map(f => (
+          <TouchableOpacity key={f} style={[s.chip, status === f && s.chipActive]} onPress={() => setFilter(setStatus, 'status', f)}>
+            <Text style={[s.chipText, status === f && s.chipTextActive]}>
+              {f === 'all' ? 'Alle' : f === 'open' ? 'Offen' : 'Geschlossen'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        <View style={s.sep} />
+        {(['all', 'long', 'short'] as FilterSide[]).map(f => (
+          <TouchableOpacity key={f} style={[s.chip, side === f && s.chipActive]} onPress={() => setFilter(setSide, 'side', f)}>
+            <Text style={[s.chipText, side === f && s.chipTextActive]}>
+              {f === 'all' ? 'L+S' : f === 'long' ? 'Long' : 'Short'}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      {/* Trade count */}
-      <Text style={s.count}>{filtered.length} Trades</Text>
+      {/* Strategy filter */}
+      {strategies.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.hScroll} contentContainerStyle={s.hScrollContent}>
+          <TouchableOpacity style={[s.stratChip, !selectedStrategyId && s.stratChipActive]} onPress={() => setFilter(setSelectedStrategyId, 'strategy', '')}>
+            <Text style={[s.stratChipText, !selectedStrategyId && s.stratChipTextActive]}>Alle Strategien</Text>
+          </TouchableOpacity>
+          {strategies.map(st => (
+            <TouchableOpacity key={st.id} style={[s.stratChip, selectedStrategyId === st.id && s.stratChipActive]} onPress={() => setFilter(setSelectedStrategyId, 'strategy', st.id)}>
+              <Text style={[s.stratChipText, selectedStrategyId === st.id && s.stratChipTextActive]}>{st.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* Tag filter */}
+      {tags.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.hScroll} contentContainerStyle={s.hScrollContent}>
+          <TouchableOpacity style={[s.tagChip, !selectedTagId && s.tagChipAllActive]} onPress={() => setFilter(setSelectedTagId, 'tag', '')}>
+            <Text style={[s.tagChipText, !selectedTagId && s.tagChipTextActive]}>Alle Tags</Text>
+          </TouchableOpacity>
+          {tags.map(tag => (
+            <TouchableOpacity key={tag.id} style={[s.tagChip, selectedTagId === tag.id && s.tagChipActive]} onPress={() => setFilter(setSelectedTagId, 'tag', tag.id)}>
+              <Text style={[s.tagChipText, selectedTagId === tag.id && s.tagChipTextActive]}>{tag.name.replace(/_/g, ' ')}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
+      <Text style={s.count}>{filtered.length} Trades{hasActiveFilter ? ' (gefiltert)' : ''}</Text>
 
       <FlatList
         data={filtered}
@@ -93,6 +177,11 @@ export default function JournalScreen() {
         renderItem={renderItem}
         contentContainerStyle={s.list}
         initialNumToRender={20}
+        ListEmptyComponent={
+          <View style={s.empty}>
+            <Text style={s.emptyText}>{loading ? 'Laden...' : 'Keine Trades gefunden'}</Text>
+          </View>
+        }
       />
 
       <TouchableOpacity style={s.fab} onPress={() => router.push('/trade/new')}>
@@ -104,9 +193,6 @@ export default function JournalScreen() {
 
 function TradeItem({ trade, onPress }: { trade: Trade; onPress: () => void }) {
   const isLong = trade.side === 'long'
-  const isWin = trade.exit_price != null && (
-    isLong ? trade.exit_price > trade.entry_price : trade.exit_price < trade.entry_price
-  )
   const rMultiple = trade.exit_price != null && trade.stop_loss != null ? (() => {
     const risk = Math.abs(trade.entry_price - trade.stop_loss)
     const pnl = isLong ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price
@@ -143,7 +229,7 @@ function TradeItem({ trade, onPress }: { trade: Trade; onPress: () => void }) {
         <View style={s.prices}>
           <Text style={s.priceLabel}>Entry <Text style={s.priceVal}>{trade.entry_price.toLocaleString()}</Text></Text>
           <Text style={s.priceLabel}>SL <Text style={[s.priceVal, s.red]}>{trade.stop_loss.toLocaleString()}</Text></Text>
-          {trade.exit_price && <Text style={s.priceLabel}>Exit <Text style={[s.priceVal, isWin ? s.green : s.red]}>{trade.exit_price.toLocaleString()}</Text></Text>}
+          {trade.exit_price && <Text style={s.priceLabel}>Exit <Text style={[s.priceVal, rMultiple && parseFloat(rMultiple) > 0 ? s.green : s.red]}>{trade.exit_price.toLocaleString()}</Text></Text>}
         </View>
         {trade.setup ? <Text style={s.setup} numberOfLines={1}>{trade.setup}</Text> : null}
       </View>
@@ -155,14 +241,29 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0f0f0f' },
   searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', margin: 16, marginBottom: 8, borderRadius: 10, paddingHorizontal: 12, gap: 8 },
   searchInput: { flex: 1, color: '#fff', fontSize: 15, paddingVertical: 10 },
-  filters: { paddingHorizontal: 16, gap: 6, marginBottom: 4 },
-  filterGroup: { flexDirection: 'row', gap: 6 },
-  chip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a' },
+  clearBtn: { padding: 4 },
+  filterRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 6, marginBottom: 6, flexWrap: 'wrap' },
+  sep: { width: 1, height: 16, backgroundColor: '#2a2a2a', marginHorizontal: 2 },
+  chip: { paddingHorizontal: 11, paddingVertical: 5, borderRadius: 20, backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a' },
   chipActive: { backgroundColor: '#052e16', borderColor: '#22c55e' },
   chipText: { color: '#666', fontSize: 12, fontWeight: '600' },
   chipTextActive: { color: '#22c55e' },
+  hScroll: { maxHeight: 36 },
+  hScrollContent: { paddingHorizontal: 16, gap: 6, alignItems: 'center' },
+  stratChip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a' },
+  stratChipActive: { backgroundColor: '#1e1a3a', borderColor: '#818cf8' },
+  stratChipText: { color: '#666', fontSize: 12, fontWeight: '600' },
+  stratChipTextActive: { color: '#818cf8' },
+  tagChip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a' },
+  tagChipAll: {},
+  tagChipAllActive: { backgroundColor: '#1a1a1a', borderColor: '#444' },
+  tagChipActive: { backgroundColor: '#1a2a3a', borderColor: '#3b82f6' },
+  tagChipText: { color: '#666', fontSize: 12, fontWeight: '600' },
+  tagChipTextActive: { color: '#60a5fa' },
   count: { color: '#555', fontSize: 12, paddingHorizontal: 16, marginBottom: 8, marginTop: 4 },
   list: { paddingHorizontal: 16, paddingBottom: 80 },
+  empty: { alignItems: 'center', padding: 40 },
+  emptyText: { color: '#555', fontSize: 14 },
   item: { flexDirection: 'row', backgroundColor: '#1a1a1a', borderRadius: 12, marginBottom: 8, overflow: 'hidden' },
   sideBar: { width: 3 },
   longBar: { backgroundColor: '#22c55e' },
