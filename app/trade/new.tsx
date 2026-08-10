@@ -30,6 +30,7 @@ export default function NewTradeScreen() {
     risk_percent: '1',
     setup: '',
     notes: '',
+    trade_data_quality: 'live' as string,
   })
 
   useEffect(() => {
@@ -132,6 +133,7 @@ export default function NewTradeScreen() {
       leverage: acc?.default_leverage ?? 1,
       setup: form.setup,
       notes: form.notes,
+      trade_data_quality: form.trade_data_quality,
       opened_at: new Date().toISOString(),
     }).select().single()
 
@@ -302,6 +304,24 @@ export default function NewTradeScreen() {
             )}
           </>
         )}
+
+        <Label text="Datenqualität" />
+        <View style={s.optionRow}>
+          {([
+            { value: 'live', label: 'Live (exakt)' },
+            { value: 'approx', label: 'Live (ca.)' },
+            { value: 'visual_backtest', label: 'Backtest' },
+            { value: 'managed_live', label: 'Live (managed)' },
+          ] as const).map(q => (
+            <TouchableOpacity
+              key={q.value}
+              style={[s.option, form.trade_data_quality === q.value && s.optionActive]}
+              onPress={() => update('trade_data_quality', q.value)}
+            >
+              <Text style={[s.optionText, form.trade_data_quality === q.value && s.optionTextActive]}>{q.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
         <Label text="Setup" />
         <Input value={form.setup} onChangeText={v => update('setup', v)} placeholder="z.B. HTF Zone + M5 Reaction" />

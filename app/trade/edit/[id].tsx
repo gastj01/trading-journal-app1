@@ -34,6 +34,7 @@ export default function EditTradeScreen() {
     notes: '',
     screenshot_path: '',
     strategy_id: '',
+    trade_data_quality: 'live' as string,
   })
 
   useEffect(() => {
@@ -69,6 +70,7 @@ export default function EditTradeScreen() {
         notes: data.notes ?? '',
         screenshot_path: data.screenshot_path ?? '',
         strategy_id: stratId,
+        trade_data_quality: data.trade_data_quality ?? 'live',
       })
       if (stratId) {
         const strat = (strats ?? []).find((s: StrategyProfile) => s.id === stratId)
@@ -203,6 +205,7 @@ export default function EditTradeScreen() {
       setup: form.setup,
       notes: form.notes,
       screenshot_path: form.screenshot_path || null,
+      trade_data_quality: form.trade_data_quality,
       strategy_id: form.strategy_id || null,
       closed_at: form.status === 'closed' ? (trade?.closed_at ?? new Date().toISOString()) : null,
     }).eq('id', id)
@@ -385,6 +388,24 @@ export default function EditTradeScreen() {
             )}
           </>
         )}
+
+        <Text style={s.label}>Datenqualität</Text>
+        <View style={s.optionRow}>
+          {([
+            { value: 'live', label: 'Live (exakt)' },
+            { value: 'approx', label: 'Live (ca.)' },
+            { value: 'visual_backtest', label: 'Backtest' },
+            { value: 'managed_live', label: 'Live (managed)' },
+          ] as const).map(q => (
+            <TouchableOpacity
+              key={q.value}
+              style={[s.option, form.trade_data_quality === q.value && s.optionActive]}
+              onPress={() => update('trade_data_quality', q.value)}
+            >
+              <Text style={[s.optionText, form.trade_data_quality === q.value && s.optionTextActive]}>{q.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
         <Text style={s.label}>Setup</Text>
         <TextInput style={s.input} placeholderTextColor="#555" placeholder="z.B. HTF Zone + M5 Reaction" value={form.setup} onChangeText={v => update('setup', v)} />
