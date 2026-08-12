@@ -202,7 +202,9 @@ export default function ManageTradeScreen() {
       const endMs = trade.closed_at ? new Date(trade.closed_at).getTime() : Date.now()
       const candles = await fetchCandles(symbol, interval, startMs, endMs)
       if (candles.length === 0) { Alert.alert('Keine Kerzen', 'Für diesen Zeitraum keine Kerzen gefunden.'); setDetecting(false); return }
-      const tpLevels = partialProfits.map(pp => ({ price: pp.target_price, quantity_percent: pp.quantity_percent }))
+      const tpLevels = partialProfits
+        .filter(pp => pp.quantity_percent > 0)
+        .map(pp => ({ price: pp.target_price, quantity_percent: pp.quantity_percent }))
       const detected = detectManagementEvents(candles, trade.entry_price, trade.stop_loss, trade.side, tpLevels)
       if (detected.length === 0) { Alert.alert('Keine Events', 'SL und TPs wurden in diesem Zeitraum nicht getroffen.'); setDetecting(false); return }
       setDetectedEvents(detected)
@@ -302,6 +304,38 @@ export default function ManageTradeScreen() {
           {detecting ? <ActivityIndicator size="small" color="#f59e0b" /> : <Feather name="activity" size={16} color="#f59e0b" />}
           <Text style={s.candleBtnText}>{detecting ? 'Kerzen werden geladen…' : 'Events aus Kerzen erkennen'}</Text>
         </TouchableOpacity>
+
+        {partialProfits.filter(pp => pp.quantity_percent > 0).length > 0 && (
+          <>
+            <Text style={s.sectionTitle}>TP-Level</Text>
+            <View style={s.tpGrid}>
+              {partialProfits.filter(pp => pp.quantity_percent > 0).map(pp => {
+                const r = calcR(pp.target_price)
+                const alreadyHit = events.some(ev => ev.event_type === 'tp_hit' && Math.abs((ev.price ?? 0) - pp.target_price) < pp.target_price * 0.001)
+                return (
+                  <TouchableOpacity
+                    key={pp.id}
+                    style={[s.tpBtn, alreadyHit && s.tpBtnHit]}
+                    onPress={() => {
+                      const tpAction = ACTIONS.find(a => a.key === 'tp_hit')!
+                      setActiveAction(tpAction)
+                      setNote('')
+                      setSizePercent(String(pp.quantity_percent))
+                      setEventDate(nowDateStr())
+                      setEventTime(nowTimeStr())
+                      setPrice(String(pp.target_price))
+                    }}
+                  >
+                    <Text style={[s.tpLabel, alreadyHit && s.tpLabelHit]}>{pp.label}</Text>
+                    <Text style={[s.tpPrice, alreadyHit && s.tpLabelHit]}>{pp.target_price.toLocaleString()}</Text>
+                    <Text style={s.tpMeta}>{pp.quantity_percent}% · {r !== null ? `+${r}R` : '—'}</Text>
+                    {alreadyHit && <Feather name="check" size={12} color="#22c55e" style={{ marginTop: 2 }} />}
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+          </>
+        )}
 
         <Text style={s.sectionTitle}>Schnellaktionen</Text>
         <View style={s.actionGrid}>
@@ -464,6 +498,13 @@ const s = StyleSheet.create({
   candleBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1a1a00', borderWidth: 1, borderColor: '#f59e0b44', borderRadius: 10, padding: 12, marginBottom: 16 },
   candleBtnText: { color: '#f59e0b', fontSize: 13, fontWeight: '600' },
   sectionTitle: { color: '#555', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 },
+  tpGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  tpBtn: { backgroundColor: '#0a1f0f', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#22c55e33', minWidth: '30%', flex: 1, alignItems: 'center', gap: 2 },
+  tpBtnHit: { backgroundColor: '#0a1a0a', borderColor: '#22c55e88', opacity: 0.6 },
+  tpLabel: { color: '#22c55e', fontSize: 12, fontWeight: '700' },
+  tpLabelHit: { color: '#555' },
+  tpPrice: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  tpMeta: { color: '#555', fontSize: 11 },
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   actionBtn: { width: '47%', backgroundColor: '#1a1a1a', borderRadius: 12, padding: 16, alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#2a2a2a' },
   actionLabel: { color: '#ccc', fontSize: 13, fontWeight: '600', textAlign: 'center' },
