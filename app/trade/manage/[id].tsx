@@ -92,7 +92,7 @@ export default function ManageTradeScreen() {
     const [{ data: t }, { data: ev }, { data: pp }] = await Promise.all([
       supabase.from('trades').select('*').eq('id', id).single(),
       supabase.from('trade_management_events').select('*').eq('trade_id', id).order('event_time', { ascending: false }),
-      supabase.from('partial_profits').select('*').eq('trade_id', id).order('target_price'),
+      supabase.from('trade_partial_profits').select('*').eq('trade_id', id).order('target_price'),
     ])
     setEvents(ev ?? [])
     setPartialProfits(pp ?? [])

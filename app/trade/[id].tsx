@@ -109,12 +109,10 @@ export default function TradeDetailScreen() {
           </View>
         </View>
         <View style={s.headerActions}>
-          {trade.status === 'open' && (
-            <TouchableOpacity onPress={() => router.push(`/trade/manage/${id}`)} style={s.manageBtn}>
-              <Feather name="activity" size={14} color="#000" />
-              <Text style={s.manageBtnText}>Verwalten</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity onPress={() => router.push(`/trade/manage/${id}`)} style={s.manageBtn}>
+            <Feather name="activity" size={14} color="#000" />
+            <Text style={s.manageBtnText}>Verwalten</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => router.push(`/trade/analysis/${id}`)} style={s.aiBtn}>
             <Feather name="cpu" size={14} color="#818cf8" />
             <Text style={s.aiBtnText}>KI</Text>

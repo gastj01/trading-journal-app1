@@ -17,6 +17,8 @@ export default function NewTradeScreen() {
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
   const [rulesExpanded, setRulesExpanded] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [tpLevels, setTpLevels] = useState<{ price: string; qty: string }[]>([])
+  const [bePrice, setBePrice] = useState('')
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
 
@@ -187,6 +189,20 @@ export default function NewTradeScreen() {
       )
     }
 
+    // TPs + BE trigger
+    if (tradeData) {
+      const ppRows: any[] = []
+      tpLevels.forEach((tp, i) => {
+        const p = parseFloat(tp.price)
+        const q = parseFloat(tp.qty)
+        if (p > 0 && q > 0) ppRows.push({ trade_id: tradeData.id, user_id: user.id, label: `TP${i + 1}`, target_price: p, quantity_percent: q, filled: false })
+      })
+      if (bePrice && parseFloat(bePrice) > 0) {
+        ppRows.push({ trade_id: tradeData.id, user_id: user.id, label: 'BE', target_price: parseFloat(bePrice), quantity_percent: 0, filled: false })
+      }
+      if (ppRows.length > 0) await supabase.from('trade_partial_profits').insert(ppRows)
+    }
+
     setSaving(false)
     router.back()
   }
@@ -295,6 +311,28 @@ export default function NewTradeScreen() {
             )}
           </View>
         )}
+
+        <Label text="Take-Profit Levels" />
+        {tpLevels.map((tp, i) => (
+          <View key={i} style={s.tpRow}>
+            <View style={{ flex: 2 }}>
+              <Input value={tp.price} onChangeText={v => setTpLevels(prev => prev.map((t, j) => j === i ? { ...t, price: v } : t))} keyboardType="decimal-pad" placeholder={`TP${i + 1} Preis`} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Input value={tp.qty} onChangeText={v => setTpLevels(prev => prev.map((t, j) => j === i ? { ...t, qty: v } : t))} keyboardType="decimal-pad" placeholder="%" />
+            </View>
+            <TouchableOpacity onPress={() => setTpLevels(prev => prev.filter((_, j) => j !== i))} style={s.tpRemove}>
+              <Feather name="x" size={16} color="#ef4444" />
+            </TouchableOpacity>
+          </View>
+        ))}
+        <TouchableOpacity style={s.addTpBtn} onPress={() => setTpLevels(prev => [...prev, { price: '', qty: '' }])}>
+          <Feather name="plus" size={14} color="#22c55e" />
+          <Text style={s.addTpText}>TP hinzufügen</Text>
+        </TouchableOpacity>
+
+        <Label text="Break Even bei Preis (optional)" />
+        <Input value={bePrice} onChangeText={setBePrice} keyboardType="decimal-pad" placeholder="Preis bei dem SL auf BE gesetzt wird" />
 
         {strategies.length > 0 && (
           <>
@@ -471,6 +509,10 @@ const s = StyleSheet.create({
   tagChipActive: { backgroundColor: '#1a2a3a', borderColor: '#3b82f6' },
   tagChipText: { color: '#888', fontSize: 13 },
   tagChipTextActive: { color: '#60a5fa' },
+  tpRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 6 },
+  tpRemove: { padding: 8 },
+  addTpBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
+  addTpText: { color: '#22c55e', fontSize: 13, fontWeight: '600' },
   calcRow: { flexDirection: 'row', gap: 16, paddingHorizontal: 2, marginTop: 4 },
   calcText: { color: '#22c55e', fontSize: 12, fontWeight: '600' },
   calcTextMuted: { color: '#555', fontSize: 12 },
