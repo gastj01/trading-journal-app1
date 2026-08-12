@@ -4,7 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
-import type { Trade, StrategyProfile, TagDefinition } from '../../src/types'
+import { calcWeightedR } from '../../src/lib/tradeCalc'
+import type { Trade, StrategyProfile, TagDefinition, ManagementEvent } from '../../src/types'
 
 type FilterStatus = 'all' | 'open' | 'closed'
 type FilterSide = 'all' | 'long' | 'short'
@@ -22,6 +23,7 @@ export default function JournalScreen() {
   const [selectedStrategyId, setSelectedStrategyId] = useState('')
   const [selectedTagId, setSelectedTagId] = useState('')
   const [loading, setLoading] = useState(true)
+  const [eventsByTradeId, setEventsByTradeId] = useState<Map<string, ManagementEvent[]>>(new Map())
 
   useFocusEffect(useCallback(() => {
     load()
@@ -30,17 +32,24 @@ export default function JournalScreen() {
   async function load() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const [{ data: tradeData }, { data: strats }, { data: tagDefs }, { data: assigns }] = await Promise.all([
+    const [{ data: tradeData }, { data: strats }, { data: tagDefs }, { data: assigns }, { data: evData }] = await Promise.all([
       supabase.from('trades').select('*').eq('user_id', user.id).order('opened_at', { ascending: false }),
       supabase.from('strategy_profiles').select('*').eq('user_id', user.id).order('name'),
       supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id).order('tag_type'),
       supabase.from('trade_tag_assignments').select('trade_id, tag_id').eq('user_id', user.id),
+      supabase.from('trade_management_events').select('*').eq('user_id', user.id),
     ])
     const loadedTrades = tradeData ?? []
+    const evMap = new Map<string, ManagementEvent[]>()
+    for (const ev of (evData ?? [])) {
+      if (!evMap.has(ev.trade_id)) evMap.set(ev.trade_id, [])
+      evMap.get(ev.trade_id)!.push(ev)
+    }
     setTrades(loadedTrades)
     setStrategies(strats ?? [])
     setTags(tagDefs ?? [])
     setTagAssignments(assigns ?? [])
+    setEventsByTradeId(evMap)
     applyFilters(loadedTrades, assigns ?? [], search, status, side, selectedStrategyId, selectedTagId)
     setLoading(false)
   }
@@ -99,8 +108,8 @@ export default function JournalScreen() {
   }
 
   const renderItem = useCallback(({ item }: { item: Trade }) => (
-    <TradeItem trade={item} onPress={() => router.push(`/trade/${item.id}`)} />
-  ), [])
+    <TradeItem trade={item} events={eventsByTradeId.get(item.id) ?? []} onPress={() => router.push(`/trade/${item.id}`)} />
+  ), [eventsByTradeId])
 
   return (
     <SafeAreaView style={s.safe}>
@@ -190,13 +199,10 @@ export default function JournalScreen() {
   )
 }
 
-function TradeItem({ trade, onPress }: { trade: Trade; onPress: () => void }) {
+function TradeItem({ trade, events, onPress }: { trade: Trade; events: ManagementEvent[]; onPress: () => void }) {
   const isLong = trade.side === 'long'
-  const rMultiple = trade.exit_price != null && trade.stop_loss != null ? (() => {
-    const risk = Math.abs(trade.entry_price - trade.stop_loss)
-    const pnl = isLong ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price
-    return risk > 0 ? (pnl / risk).toFixed(2) : null
-  })() : null
+  const rRaw = trade.exit_price != null ? calcWeightedR(trade, events) : null
+  const rMultiple = rRaw != null ? rRaw.toFixed(2) : null
 
   return (
     <TouchableOpacity style={s.item} onPress={onPress}>

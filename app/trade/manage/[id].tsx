@@ -345,7 +345,7 @@ export default function ManageTradeScreen() {
 
       {/* New event modal */}
       <Modal visible={activeAction !== null} transparent animationType="slide" onRequestClose={closeAction}>
-        <KeyboardAvoidingView style={s.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <KeyboardAvoidingView style={s.modalOverlay} behavior="padding">
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={closeAction} />
           <View style={s.actionPanel}>
             <View style={s.panelHandle} />
@@ -372,7 +372,7 @@ export default function ManageTradeScreen() {
 
       {/* Edit event modal */}
       <Modal visible={editingEvent !== null} transparent animationType="slide" onRequestClose={closeEdit}>
-        <KeyboardAvoidingView style={s.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <KeyboardAvoidingView style={s.modalOverlay} behavior="padding">
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={closeEdit} />
           <View style={s.actionPanel}>
             <View style={s.panelHandle} />

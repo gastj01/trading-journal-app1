@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../src/lib/supabase'
 import { ANTHROPIC_KEY } from './settings'
+import { calcWeightedR } from '../../src/lib/tradeCalc'
 import type { Trade, TagDefinition, StrategyProfile, ManagementEvent } from '../../src/types'
 
 type Period = '7d' | '30d' | '90d' | 'all'
@@ -43,6 +44,15 @@ export default function AnalyticsScreen() {
     load()
   }, [])
 
+  const eventsByTradeId = useMemo(() => {
+    const map = new Map<string, ManagementEvent[]>()
+    for (const ev of managementEvents) {
+      if (!map.has(ev.trade_id)) map.set(ev.trade_id, [])
+      map.get(ev.trade_id)!.push(ev)
+    }
+    return map
+  }, [managementEvents])
+
   const filtered = useMemo(() => {
     let result = selectedStrategy === null
       ? trades
@@ -71,10 +81,8 @@ export default function AnalyticsScreen() {
       if (!filteredIds.has(a.trade_id)) continue
       const trade = tradeMap.get(a.trade_id)
       if (!trade || !trade.exit_price || !stats[a.tag_id]) continue
-      const risk = Math.abs(trade.entry_price - trade.stop_loss)
-      const pnl = trade.side === 'long' ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price
-      const r = risk > 0 ? pnl / risk : 0
-      const isWin = trade.side === 'long' ? trade.exit_price > trade.entry_price : trade.exit_price < trade.entry_price
+      const r = calcWeightedR(trade, eventsByTradeId.get(trade.id) ?? []) ?? 0
+      const isWin = r > 0
       stats[a.tag_id].total++
       if (isWin) stats[a.tag_id].inWin++; else stats[a.tag_id].inLoss++
       stats[a.tag_id].rVals.push(r)
@@ -130,7 +138,7 @@ export default function AnalyticsScreen() {
     }
   }, [filtered, managementEvents])
 
-  const stats = calcStats(filtered)
+  const stats = calcStats(filtered, eventsByTradeId)
   const sessions = [
     { label: 'Asian', start: 0, end: 7, color: '#818cf8' },
     { label: 'London', start: 7, end: 12, color: '#f59e0b' },
@@ -155,14 +163,14 @@ export default function AnalyticsScreen() {
     ]
     const sessionLines = sessions.map(sess => {
       const t = filtered.filter(t => { const h = new Date(t.opened_at).getUTCHours(); return h >= sess.start && h < sess.end })
-      const st = calcStats(t)
+      const st = calcStats(t, eventsByTradeId)
       return `  ${sess.label}: ${t.length} Trades, ${st.winRate.toFixed(0)}% WR, ${st.totalR > 0 ? '+' : ''}${st.totalR.toFixed(1)}R`
     }).join('\n')
 
     const days = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
     const dayLines = days.map((day, i) => {
       const t = filtered.filter(tr => new Date(tr.opened_at).getDay() === (i + 1) % 7)
-      const st = calcStats(t)
+      const st = calcStats(t, eventsByTradeId)
       return t.length > 0 ? `  ${day}: ${t.length} Trades, ${st.winRate.toFixed(0)}% WR, ${st.totalR > 0 ? '+' : ''}${st.totalR.toFixed(1)}R` : null
     }).filter(Boolean).join('\n')
 
@@ -304,8 +312,8 @@ Direkt und präzise. Kein Intro.`
         <View style={s.section}>
           <Text style={s.sectionTitle}>Long / Short</Text>
           <View style={s.sideStats}>
-            <SideStat label="Long" trades={filtered.filter(t => t.side === 'long')} />
-            <SideStat label="Short" trades={filtered.filter(t => t.side === 'short')} />
+            <SideStat label="Long" trades={filtered.filter(t => t.side === 'long')} eventsByTrade={eventsByTradeId} />
+            <SideStat label="Short" trades={filtered.filter(t => t.side === 'short')} eventsByTrade={eventsByTradeId} />
           </View>
         </View>
 
@@ -316,7 +324,7 @@ Direkt und präzise. Kein Intro.`
               const h = new Date(t.opened_at).getUTCHours()
               return h >= sess.start && h < sess.end
             })
-            const st = calcStats(sessTrades)
+            const st = calcStats(sessTrades, eventsByTradeId)
             if (sessTrades.length === 0) return (
               <View key={sess.label} style={s.sessRow}>
                 <View style={[s.sessIndicator, { backgroundColor: sess.color }]} />
@@ -342,7 +350,7 @@ Direkt und präzise. Kein Intro.`
           <Text style={s.sectionTitle}>Nach Wochentag</Text>
           {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((day, i) => {
             const dayTrades = filtered.filter(t => new Date(t.opened_at).getDay() === (i + 1) % 7)
-            const dayStats = calcStats(dayTrades)
+            const dayStats = calcStats(dayTrades, eventsByTradeId)
             return (
               <View key={day} style={s.dayRow}>
                 <Text style={s.dayLabel}>{day}</Text>
@@ -462,15 +470,13 @@ Direkt und präzise. Kein Intro.`
   )
 }
 
-function calcStats(trades: Trade[]) {
-  const wins = trades.filter(t => t.exit_price != null && (t.side === 'long' ? t.exit_price > t.entry_price : t.exit_price < t.entry_price))
-  const losses = trades.filter(t => t.exit_price != null && (t.side === 'long' ? t.exit_price <= t.entry_price : t.exit_price >= t.entry_price))
+function calcStats(trades: Trade[], eventsByTrade: Map<string, ManagementEvent[]> = new Map()) {
   const rValues = trades.map(t => {
     if (!t.exit_price) return 0
-    const risk = Math.abs(t.entry_price - t.stop_loss)
-    const pnl = t.side === 'long' ? t.exit_price - t.entry_price : t.entry_price - t.exit_price
-    return risk > 0 ? pnl / risk : 0
+    return calcWeightedR(t, eventsByTrade.get(t.id) ?? []) ?? 0
   })
+  const wins = trades.filter((_, i) => rValues[i] > 0)
+  const losses = trades.filter((t, i) => t.exit_price != null && rValues[i] <= 0)
   const totalR = rValues.reduce((a, b) => a + b, 0)
   const avgR = trades.length > 0 ? totalR / trades.length : 0
   const grossWin = rValues.filter(r => r > 0).reduce((a, b) => a + b, 0)
@@ -505,8 +511,8 @@ function MgmtStat({ label, value, sub, positive }: { label: string; value: strin
   )
 }
 
-function SideStat({ label, trades }: { label: string; trades: Trade[] }) {
-  const st = calcStats(trades)
+function SideStat({ label, trades, eventsByTrade }: { label: string; trades: Trade[]; eventsByTrade: Map<string, ManagementEvent[]> }) {
+  const st = calcStats(trades, eventsByTrade)
   return (
     <View style={s.sideStatBox}>
       <Text style={s.sideStatLabel}>{label}</Text>
