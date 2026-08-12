@@ -32,6 +32,8 @@ export default function NewTradeScreen() {
     notes: '',
     trade_data_quality: 'live' as string,
     position_size: '',
+    backtest_date: '',
+    backtest_time: '',
   })
 
   useEffect(() => {
@@ -133,6 +135,14 @@ export default function NewTradeScreen() {
       ? parseFloat(form.position_size)
       : riskPerUnit > 0 ? riskAmount / riskPerUnit : 0
 
+    let openedAt = new Date().toISOString()
+    if (form.trade_data_quality === 'visual_backtest' && form.backtest_date) {
+      const [day, month, year] = form.backtest_date.split('.')
+      const time = form.backtest_time || '00:00'
+      const parsed = new Date(`${year}-${month}-${day}T${time}:00`)
+      if (!isNaN(parsed.getTime())) openedAt = parsed.toISOString()
+    }
+
     setSaving(true)
     const { data: tradeData, error } = await supabase.from('trades').insert({
       user_id: user.id,
@@ -155,7 +165,7 @@ export default function NewTradeScreen() {
       setup: form.setup,
       notes: form.notes,
       trade_data_quality: form.trade_data_quality,
-      opened_at: new Date().toISOString(),
+      opened_at: openedAt,
     }).select().single()
 
     if (error) {
@@ -370,6 +380,30 @@ export default function NewTradeScreen() {
             </TouchableOpacity>
           ))}
         </View>
+
+        {form.trade_data_quality === 'visual_backtest' && (
+          <>
+            <Label text="Handelszeitpunkt" />
+            <View style={s.row2}>
+              <View style={{ flex: 3 }}>
+                <Input
+                  value={form.backtest_date}
+                  onChangeText={v => update('backtest_date', v)}
+                  placeholder="TT.MM.JJJJ"
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={{ flex: 2 }}>
+                <Input
+                  value={form.backtest_time}
+                  onChangeText={v => update('backtest_time', v)}
+                  placeholder="HH:MM"
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+          </>
+        )}
 
         <Label text="Setup" />
         <Input value={form.setup} onChangeText={v => update('setup', v)} placeholder="z.B. HTF Zone + M5 Reaction" />
