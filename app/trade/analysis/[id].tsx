@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput, Alert } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
@@ -27,6 +27,9 @@ export default function TradeAnalysisScreen() {
   const [error, setError] = useState<string | null>(null)
   const [hasKey, setHasKey] = useState(false)
   const [promptText, setPromptText] = useState('')
+  const [strategyEdit, setStrategyEdit] = useState('')
+  const [strategyEditOpen, setStrategyEditOpen] = useState(false)
+  const [strategySaving, setStrategySaving] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -110,6 +113,27 @@ export default function TradeAnalysisScreen() {
     setError(null)
   }
 
+  function openStrategyEdit() {
+    setStrategyEdit(strategy?.description ?? '')
+    setStrategyEditOpen(true)
+  }
+
+  async function saveStrategyDescription() {
+    if (!strategy) return
+    setStrategySaving(true)
+    const { error } = await supabase
+      .from('strategy_profiles')
+      .update({ description: strategyEdit.trim() })
+      .eq('id', strategy.id)
+    setStrategySaving(false)
+    if (error) {
+      Alert.alert('Fehler', error.message)
+      return
+    }
+    setStrategy(s => s ? { ...s, description: strategyEdit.trim() } : s)
+    setStrategyEditOpen(false)
+  }
+
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
@@ -187,6 +211,37 @@ export default function TradeAnalysisScreen() {
               <Feather name="edit-2" size={14} color="#666" />
               <Text style={s.rerunText}>Prompt bearbeiten & neu analysieren</Text>
             </TouchableOpacity>
+
+            {strategy && (
+              <View style={s.stratEditBox}>
+                <TouchableOpacity style={s.stratEditHeader} onPress={() => strategyEditOpen ? setStrategyEditOpen(false) : openStrategyEdit()}>
+                  <Feather name="book-open" size={14} color="#818cf8" />
+                  <Text style={s.stratEditTitle}>Strategie-Regelwerk bearbeiten</Text>
+                  <Feather name={strategyEditOpen ? 'chevron-up' : 'chevron-down'} size={14} color="#555" />
+                </TouchableOpacity>
+                {strategyEditOpen && (
+                  <>
+                    <TextInput
+                      style={s.stratEditInput}
+                      value={strategyEdit}
+                      onChangeText={setStrategyEdit}
+                      multiline
+                      textAlignVertical="top"
+                      placeholderTextColor="#555"
+                      placeholder="Strategie-Regeln..."
+                    />
+                    <View style={s.stratEditBtns}>
+                      <TouchableOpacity style={s.stratCancelBtn} onPress={() => setStrategyEditOpen(false)}>
+                        <Text style={s.stratCancelText}>Abbrechen</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={s.stratSaveBtn} onPress={saveStrategyDescription} disabled={strategySaving}>
+                        <Text style={s.stratSaveText}>{strategySaving ? '...' : 'Speichern'}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </View>
+            )}
           </>
         )}
       </ScrollView>
@@ -240,6 +295,15 @@ const s = StyleSheet.create({
   analysisText: { color: '#bbb', fontSize: 14, lineHeight: 22 },
   rerunBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, alignSelf: 'center' },
   rerunText: { color: '#555', fontSize: 13 },
+  stratEditBox: { marginTop: 16, backgroundColor: '#111', borderRadius: 12, borderWidth: 1, borderColor: '#1e1a3a', overflow: 'hidden' },
+  stratEditHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14 },
+  stratEditTitle: { flex: 1, color: '#818cf8', fontSize: 13, fontWeight: '600' },
+  stratEditInput: { backgroundColor: '#0f0f0f', margin: 10, marginTop: 0, borderRadius: 8, padding: 12, color: '#fff', fontSize: 13, borderWidth: 1, borderColor: '#2a2a2a', minHeight: 160, lineHeight: 20 },
+  stratEditBtns: { flexDirection: 'row', gap: 8, padding: 10, paddingTop: 0 },
+  stratCancelBtn: { flex: 1, backgroundColor: '#2a2a2a', borderRadius: 8, padding: 12, alignItems: 'center' },
+  stratCancelText: { color: '#aaa', fontWeight: '600', fontSize: 14 },
+  stratSaveBtn: { flex: 1, backgroundColor: '#818cf8', borderRadius: 8, padding: 12, alignItems: 'center' },
+  stratSaveText: { color: '#000', fontWeight: '700', fontSize: 14 },
   green: { color: '#22c55e' },
   red: { color: '#ef4444' },
 })
