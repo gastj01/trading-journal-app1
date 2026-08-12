@@ -114,7 +114,9 @@ export default function ManageTradeScreen() {
   function openAction(action: ActionDef) {
     setActiveAction(action)
     setNote(''); setSizePercent('')
-    setEventDate(nowDateStr()); setEventTime(nowTimeStr())
+    const defaultDate = trade ? isoToDateStr(trade.opened_at) : nowDateStr()
+    const defaultTime = trade ? isoToTimeStr(trade.opened_at) : nowTimeStr()
+    setEventDate(defaultDate); setEventTime(defaultTime)
     setPrice(action.prefilledPrice === 'entry' && trade ? String(trade.entry_price) : '')
   }
 
