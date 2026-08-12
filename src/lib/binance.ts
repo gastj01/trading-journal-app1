@@ -7,6 +7,14 @@ export interface Candle {
   closeTime: number
 }
 
+export interface DetectedEvent {
+  event_type: string
+  event_time: string
+  price: number
+  size_percent: number | null
+  note: string
+}
+
 export interface MFEMAEResult {
   mfe: number
   mae: number
@@ -95,4 +103,52 @@ export function calcMFEMAE(
   }
 
   return { mfe, mae, mfePrice, maePrice, candles }
+}
+
+export function detectManagementEvents(
+  candles: Candle[],
+  entry: number,
+  stopLoss: number,
+  side: 'long' | 'short',
+  tpLevels: Array<{ price: number; quantity_percent: number }> = [],
+): DetectedEvent[] {
+  const events: DetectedEvent[] = []
+  const pendingTPs = [...tpLevels].sort((a, b) =>
+    side === 'long' ? a.price - b.price : b.price - a.price
+  )
+  let slTriggered = false
+
+  for (const c of candles) {
+    if (slTriggered) break
+    const time = new Date(c.openTime).toISOString()
+
+    for (let i = pendingTPs.length - 1; i >= 0; i--) {
+      const tp = pendingTPs[i]
+      const hit = side === 'long' ? c.high >= tp.price : c.low <= tp.price
+      if (hit) {
+        events.push({
+          event_type: 'tp_hit',
+          event_time: time,
+          price: tp.price,
+          size_percent: tp.quantity_percent,
+          note: 'Automatisch aus Kerzen erkannt',
+        })
+        pendingTPs.splice(i, 1)
+      }
+    }
+
+    const slHit = side === 'long' ? c.low <= stopLoss : c.high >= stopLoss
+    if (slHit) {
+      events.push({
+        event_type: 'sl_hit',
+        event_time: time,
+        price: stopLoss,
+        size_percent: null,
+        note: 'Automatisch aus Kerzen erkannt',
+      })
+      slTriggered = true
+    }
+  }
+
+  return events.sort((a, b) => a.event_time.localeCompare(b.event_time))
 }

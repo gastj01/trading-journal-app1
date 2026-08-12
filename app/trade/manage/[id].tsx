@@ -10,12 +10,15 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../../src/lib/supabase'
-import type { Trade, ManagementEvent } from '../../../src/types'
+import { fetchCandles, detectManagementEvents, normalizeSymbol, normalizeInterval, type DetectedEvent } from '../../../src/lib/binance'
+import { nowDateStr, nowTimeStr, isoToDateStr, isoToTimeStr, parseDateTimeToISO } from '../../../src/lib/datetime'
+import type { Trade, ManagementEvent, PartialProfit } from '../../../src/types'
 
 type ActionKey =
   | 'sl_moved_to_be'
@@ -78,19 +81,31 @@ export default function ManageTradeScreen() {
   const router = useRouter()
   const [trade, setTrade] = useState<Trade | null>(null)
   const [events, setEvents] = useState<ManagementEvent[]>([])
+  const [partialProfits, setPartialProfits] = useState<PartialProfit[]>([])
   const [accountBalance, setAccountBalance] = useState(0)
   const [activeAction, setActiveAction] = useState<ActionDef | null>(null)
   const [price, setPrice] = useState('')
   const [sizePercent, setSizePercent] = useState('')
   const [note, setNote] = useState('')
+  const [eventDate, setEventDate] = useState(nowDateStr())
+  const [eventTime, setEventTime] = useState(nowTimeStr())
   const [saving, setSaving] = useState(false)
 
+  // Candle detection state
+  const [detecting, setDetecting] = useState(false)
+  const [detectedEvents, setDetectedEvents] = useState<DetectedEvent[]>([])
+  const [selectedDetected, setSelectedDetected] = useState<Set<number>>(new Set())
+  const [showDetectedModal, setShowDetectedModal] = useState(false)
+  const [savingDetected, setSavingDetected] = useState(false)
+
   const loadData = useCallback(async () => {
-    const [{ data: t }, { data: ev }] = await Promise.all([
+    const [{ data: t }, { data: ev }, { data: pp }] = await Promise.all([
       supabase.from('trades').select('*').eq('id', id).single(),
       supabase.from('trade_management_events').select('*').eq('trade_id', id).order('event_time', { ascending: false }),
+      supabase.from('partial_profits').select('*').eq('trade_id', id).order('target_price'),
     ])
     setEvents(ev ?? [])
+    setPartialProfits(pp ?? [])
     if (!t) return
     setTrade(t)
     const { data: acc } = await supabase.from('trading_accounts').select('initial_balance').eq('id', t.account_id).single()
@@ -105,6 +120,8 @@ export default function ManageTradeScreen() {
     setActiveAction(action)
     setNote('')
     setSizePercent('')
+    setEventDate(nowDateStr())
+    setEventTime(nowTimeStr())
     if (action.prefilledPrice === 'entry' && trade) {
       setPrice(String(trade.entry_price))
     } else {
@@ -130,13 +147,14 @@ export default function ManageTradeScreen() {
     }
 
     const isClose = activeAction.closestrade || (activeAction.key === 'tp_hit' && parseFloat(sizePercent) === 100)
+    const eventTime_iso = parseDateTimeToISO(eventDate, eventTime)
 
     setSaving(true)
     const { error: evError } = await supabase.from('trade_management_events').insert({
       trade_id: id,
       user_id: user.id,
       event_type: activeAction.key,
-      event_time: new Date().toISOString(),
+      event_time: eventTime_iso,
       price: activeAction.showPrice ? parseFloat(price) : trade.entry_price,
       size_percent: activeAction.showSize && sizePercent ? parseFloat(sizePercent) : null,
       size_absolute: null,
@@ -153,7 +171,7 @@ export default function ManageTradeScreen() {
       await supabase.from('trades').update({
         status: 'closed',
         exit_price: parseFloat(price),
-        closed_at: new Date().toISOString(),
+        closed_at: eventTime_iso,
       }).eq('id', id)
     }
 
@@ -161,9 +179,84 @@ export default function ManageTradeScreen() {
     closeAction()
     await loadData()
 
-    if (isClose) {
-      router.back()
+    if (isClose) router.back()
+  }
+
+  async function handleDetectFromCandles() {
+    if (!trade) return
+    const symbol = normalizeSymbol(trade.symbol)
+    const interval = normalizeInterval(trade.timeframe)
+    if (!interval) {
+      Alert.alert('Fehler', `Timeframe "${trade.timeframe}" nicht erkannt.`)
+      return
     }
+    setDetecting(true)
+    try {
+      const startMs = new Date(trade.opened_at).getTime()
+      const endMs = trade.closed_at ? new Date(trade.closed_at).getTime() : Date.now()
+      const candles = await fetchCandles(symbol, interval, startMs, endMs)
+      if (candles.length === 0) {
+        Alert.alert('Keine Kerzen', 'Für diesen Zeitraum wurden keine Kerzen gefunden.')
+        setDetecting(false)
+        return
+      }
+      const tpLevels = partialProfits.map(pp => ({
+        price: pp.target_price,
+        quantity_percent: pp.quantity_percent,
+      }))
+      const detected = detectManagementEvents(candles, trade.entry_price, trade.stop_loss, trade.side, tpLevels)
+      if (detected.length === 0) {
+        Alert.alert('Keine Events', 'SL und TPs wurden in diesem Zeitraum nicht getroffen.')
+        setDetecting(false)
+        return
+      }
+      setDetectedEvents(detected)
+      setSelectedDetected(new Set(detected.map((_, i) => i)))
+      setShowDetectedModal(true)
+    } catch (e: any) {
+      Alert.alert('Fehler', e?.message ?? 'Binance-Abruf fehlgeschlagen.')
+    }
+    setDetecting(false)
+  }
+
+  async function saveDetectedEvents() {
+    if (!trade) return
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const toSave = detectedEvents.filter((_, i) => selectedDetected.has(i))
+    if (toSave.length === 0) {
+      setShowDetectedModal(false)
+      return
+    }
+    setSavingDetected(true)
+    const lastClose = toSave.find(e => e.event_type === 'sl_hit' || (e.event_type === 'tp_hit' && e.size_percent === 100))
+    const { error } = await supabase.from('trade_management_events').insert(
+      toSave.map(ev => ({
+        trade_id: id,
+        user_id: user.id,
+        event_type: ev.event_type,
+        event_time: ev.event_time,
+        price: ev.price,
+        size_percent: ev.size_percent,
+        size_absolute: null,
+        note: ev.note,
+      }))
+    )
+    if (error) {
+      setSavingDetected(false)
+      Alert.alert('Fehler', error.message)
+      return
+    }
+    if (lastClose) {
+      await supabase.from('trades').update({
+        status: 'closed',
+        exit_price: lastClose.price,
+        closed_at: lastClose.event_time,
+      }).eq('id', id)
+    }
+    setSavingDetected(false)
+    setShowDetectedModal(false)
+    await loadData()
   }
 
   if (!trade) {
@@ -179,7 +272,6 @@ export default function ManageTradeScreen() {
   const stopLoss = trade.stop_loss
   const risk = Math.abs(entryPrice - stopLoss)
 
-  // Derive current state from management events (events sorted desc, process asc)
   const eventsAsc = [...events].reverse()
   let currentSL = trade.stop_loss
   let remainingFraction = 1.0
@@ -198,9 +290,7 @@ export default function ManageTradeScreen() {
 
   function calcR(eventPrice: number) {
     if (risk === 0) return null
-    const r = isLong
-      ? (eventPrice - entryPrice) / risk
-      : (entryPrice - eventPrice) / risk
+    const r = isLong ? (eventPrice - entryPrice) / risk : (entryPrice - eventPrice) / risk
     return r.toFixed(2)
   }
 
@@ -213,19 +303,12 @@ export default function ManageTradeScreen() {
         <View style={s.headerCenter}>
           <Text style={s.symbol}>{trade.symbol}</Text>
           <View style={[s.sidePill, isLong ? s.longPill : s.shortPill]}>
-            <Feather
-              name={isLong ? 'trending-up' : 'trending-down'}
-              size={11}
-              color={isLong ? '#22c55e' : '#ef4444'}
-            />
-            <Text style={[s.sideText, isLong ? s.green : s.red]}>
-              {isLong ? 'LONG' : 'SHORT'}
-            </Text>
+            <Feather name={isLong ? 'trending-up' : 'trending-down'} size={11} color={isLong ? '#22c55e' : '#ef4444'} />
+            <Text style={[s.sideText, isLong ? s.green : s.red]}>{isLong ? 'LONG' : 'SHORT'}</Text>
           </View>
         </View>
         <View style={s.headerMeta}>
           <Text style={s.metaText}>Entry: {trade.entry_price.toLocaleString()}</Text>
-          <Text style={s.metaSep}>|</Text>
           <Text style={s.metaText}>SL: {trade.stop_loss.toLocaleString()}</Text>
         </View>
       </View>
@@ -260,14 +343,21 @@ export default function ManageTradeScreen() {
           )}
         </View>
 
+        {/* Candle detection button */}
+        <TouchableOpacity style={s.candleBtn} onPress={handleDetectFromCandles} disabled={detecting}>
+          {detecting
+            ? <ActivityIndicator size="small" color="#f59e0b" />
+            : <Feather name="activity" size={16} color="#f59e0b" />
+          }
+          <Text style={s.candleBtnText}>
+            {detecting ? 'Kerzen werden geladen…' : 'Events aus Kerzen erkennen'}
+          </Text>
+        </TouchableOpacity>
+
         <Text style={s.sectionTitle}>Schnellaktionen</Text>
         <View style={s.actionGrid}>
           {ACTIONS.map(action => (
-            <TouchableOpacity
-              key={action.key}
-              style={s.actionBtn}
-              onPress={() => openAction(action)}
-            >
+            <TouchableOpacity key={action.key} style={s.actionBtn} onPress={() => openAction(action)}>
               <Feather name={action.icon as any} size={20} color={action.color} />
               <Text style={s.actionLabel}>{action.label}</Text>
             </TouchableOpacity>
@@ -293,7 +383,7 @@ export default function ManageTradeScreen() {
                     </View>
                     <Text style={s.eventMeta}>
                       {ev.event_type !== 'note' && ev.price ? `${ev.price.toLocaleString()} · ` : ''}
-                      {new Date(ev.event_time).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      {new Date(ev.event_time).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
                       {ev.size_percent ? ` · ${ev.size_percent}%` : ''}
                     </Text>
                     {ev.note ? <Text style={s.eventNote}>{ev.note}</Text> : null}
@@ -305,41 +395,31 @@ export default function ManageTradeScreen() {
         )}
       </ScrollView>
 
+      {/* Manual event modal */}
       <Modal visible={activeAction !== null} transparent animationType="slide" onRequestClose={closeAction}>
-        <KeyboardAvoidingView
-          style={s.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
+        <KeyboardAvoidingView style={s.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={closeAction} />
           <View style={s.actionPanel}>
             <View style={s.panelHandle} />
             <Text style={s.panelTitle}>{activeAction?.label}</Text>
 
+            <Text style={s.inputLabel}>Zeitpunkt</Text>
+            <View style={s.row2}>
+              <TextInput style={[s.input, { flex: 3 }]} value={eventDate} onChangeText={setEventDate} placeholder="TT.MM.JJJJ" keyboardType="numeric" placeholderTextColor="#555" />
+              <TextInput style={[s.input, { flex: 2 }]} value={eventTime} onChangeText={setEventTime} placeholder="HH:MM" keyboardType="numeric" placeholderTextColor="#555" />
+            </View>
+
             {activeAction?.showPrice && (
               <>
                 <Text style={s.inputLabel}>Preis</Text>
-                <TextInput
-                  style={s.input}
-                  value={price}
-                  onChangeText={setPrice}
-                  keyboardType="decimal-pad"
-                  placeholderTextColor="#555"
-                  placeholder="0.00"
-                />
+                <TextInput style={s.input} value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholderTextColor="#555" placeholder="0.00" />
               </>
             )}
 
             {activeAction?.showSize && (
               <>
                 <Text style={s.inputLabel}>Grösse %</Text>
-                <TextInput
-                  style={s.input}
-                  value={sizePercent}
-                  onChangeText={setSizePercent}
-                  keyboardType="decimal-pad"
-                  placeholderTextColor="#555"
-                  placeholder="z.B. 50"
-                />
+                <TextInput style={s.input} value={sizePercent} onChangeText={setSizePercent} keyboardType="decimal-pad" placeholderTextColor="#555" placeholder="z.B. 50" />
               </>
             )}
 
@@ -366,6 +446,53 @@ export default function ManageTradeScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Detected events modal */}
+      <Modal visible={showDetectedModal} transparent animationType="slide" onRequestClose={() => setShowDetectedModal(false)}>
+        <View style={s.modalOverlay}>
+          <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setShowDetectedModal(false)} />
+          <View style={[s.actionPanel, { maxHeight: '80%' }]}>
+            <View style={s.panelHandle} />
+            <Text style={s.panelTitle}>Erkannte Events</Text>
+            <Text style={s.detectedHint}>Aus Binance-Kerzen abgeleitet. Auswahl aufheben zum Überspringen.</Text>
+            <ScrollView style={{ marginBottom: 12 }}>
+              {detectedEvents.map((ev, i) => {
+                const checked = selectedDetected.has(i)
+                return (
+                  <TouchableOpacity
+                    key={i}
+                    style={[s.detectedRow, checked && s.detectedRowActive]}
+                    onPress={() => {
+                      setSelectedDetected(prev => {
+                        const next = new Set(prev)
+                        if (next.has(i)) next.delete(i)
+                        else next.add(i)
+                        return next
+                      })
+                    }}
+                  >
+                    <Feather name={checked ? 'check-square' : 'square'} size={18} color={checked ? '#22c55e' : '#555'} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.detectedLabel}>{EVENT_LABELS[ev.event_type] ?? ev.event_type}{ev.size_percent ? ` (${ev.size_percent}%)` : ''}</Text>
+                      <Text style={s.detectedMeta}>
+                        {ev.price.toLocaleString()} · {new Date(ev.event_time).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )
+              })}
+            </ScrollView>
+            <View style={s.panelButtons}>
+              <TouchableOpacity style={s.cancelBtn} onPress={() => setShowDetectedModal(false)}>
+                <Text style={s.cancelBtnText}>Abbrechen</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.saveBtn} onPress={saveDetectedEvents} disabled={savingDetected}>
+                <Text style={s.saveBtnText}>{savingDetected ? '...' : `${selectedDetected.size} speichern`}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   )
 }
@@ -384,7 +511,6 @@ const s = StyleSheet.create({
   sideText: { fontSize: 11, fontWeight: '700' },
   headerMeta: { flexDirection: 'column', alignItems: 'flex-end', gap: 2 },
   metaText: { color: '#888', fontSize: 11 },
-  metaSep: { color: '#444', fontSize: 11 },
   scroll: { flex: 1 },
   content: { padding: 16, paddingBottom: 40 },
   riskCard: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#2a2a2a', gap: 10 },
@@ -396,6 +522,8 @@ const s = StyleSheet.create({
   riskValueBE: { color: '#22c55e' },
   riskValueRed: { color: '#ef4444', fontSize: 14, fontWeight: '700' },
   beBadge: { color: '#22c55e', fontSize: 13, fontWeight: '700' },
+  candleBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1a1a00', borderWidth: 1, borderColor: '#f59e0b44', borderRadius: 10, padding: 12, marginBottom: 16 },
+  candleBtnText: { color: '#f59e0b', fontSize: 13, fontWeight: '600' },
   sectionTitle: { color: '#555', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 },
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   actionBtn: { width: '47%', backgroundColor: '#1a1a1a', borderRadius: 12, padding: 16, alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#2a2a2a' },
@@ -412,15 +540,21 @@ const s = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: '#000000aa' },
   actionPanel: { backgroundColor: '#1a1a1a', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 36, gap: 0 },
   panelHandle: { width: 40, height: 4, backgroundColor: '#333', borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
-  panelTitle: { color: '#fff', fontSize: 17, fontWeight: '700', marginBottom: 16 },
+  panelTitle: { color: '#fff', fontSize: 17, fontWeight: '700', marginBottom: 8 },
   inputLabel: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 6, marginTop: 12 },
   input: { backgroundColor: '#0f0f0f', borderRadius: 10, padding: 12, color: '#fff', fontSize: 15, borderWidth: 1, borderColor: '#2a2a2a' },
   inputMultiline: { height: 72, textAlignVertical: 'top' },
+  row2: { flexDirection: 'row', gap: 8 },
   panelButtons: { flexDirection: 'row', gap: 10, marginTop: 20 },
   cancelBtn: { flex: 1, backgroundColor: '#2a2a2a', borderRadius: 10, padding: 14, alignItems: 'center' },
   cancelBtnText: { color: '#aaa', fontWeight: '600', fontSize: 15 },
   saveBtn: { flex: 1, backgroundColor: '#22c55e', borderRadius: 10, padding: 14, alignItems: 'center' },
   saveBtnText: { color: '#000', fontWeight: '700', fontSize: 15 },
+  detectedHint: { color: '#666', fontSize: 12, marginBottom: 12 },
+  detectedRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 10, marginBottom: 8, backgroundColor: '#0f0f0f', borderWidth: 1, borderColor: '#2a2a2a' },
+  detectedRowActive: { borderColor: '#22c55e44', backgroundColor: '#0a1f0f' },
+  detectedLabel: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  detectedMeta: { color: '#666', fontSize: 12, marginTop: 2 },
   green: { color: '#22c55e' },
   red: { color: '#ef4444' },
 })

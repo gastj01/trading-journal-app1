@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons'
 import * as DocumentPicker from 'expo-document-picker'
 import * as FileSystem from 'expo-file-system/legacy'
 import { supabase } from '../../../src/lib/supabase'
+import { isoToDateStr, isoToTimeStr, parseDateTimeToISO } from '../../../src/lib/datetime'
 import type { Trade, TagDefinition, StrategyProfile, ChecklistItem } from '../../../src/types'
 
 export default function EditTradeScreen() {
@@ -37,6 +38,8 @@ export default function EditTradeScreen() {
     strategy_id: '',
     trade_data_quality: 'live' as string,
     position_size: '',
+    opened_at_date: '',
+    opened_at_time: '',
   })
 
   useEffect(() => {
@@ -79,6 +82,8 @@ export default function EditTradeScreen() {
         strategy_id: stratId,
         trade_data_quality: data.trade_data_quality ?? 'live',
         position_size: data.position_size != null ? String(data.position_size) : '',
+        opened_at_date: data.opened_at ? isoToDateStr(data.opened_at) : '',
+        opened_at_time: data.opened_at ? isoToTimeStr(data.opened_at) : '',
       })
       if (stratId) {
         const strat = (strats ?? []).find((s: StrategyProfile) => s.id === stratId)
@@ -231,6 +236,7 @@ export default function EditTradeScreen() {
       trade_data_quality: form.trade_data_quality,
       position_size: form.position_size ? parseFloat(form.position_size) : undefined,
       strategy_id: form.strategy_id || null,
+      opened_at: form.opened_at_date ? parseDateTimeToISO(form.opened_at_date, form.opened_at_time) : trade?.opened_at,
       closed_at: form.status === 'closed' ? (trade?.closed_at ?? new Date().toISOString()) : null,
     }).eq('id', id)
 
@@ -458,6 +464,16 @@ export default function EditTradeScreen() {
               <Text style={[s.optionText, form.trade_data_quality === q.value && s.optionTextActive]}>{q.label}</Text>
             </TouchableOpacity>
           ))}
+        </View>
+
+        <Text style={s.label}>Handelszeitpunkt</Text>
+        <View style={s.row2}>
+          <View style={{ flex: 3 }}>
+            <TextInput style={s.input} placeholderTextColor="#555" value={form.opened_at_date} onChangeText={v => update('opened_at_date', v)} placeholder="TT.MM.JJJJ" keyboardType="numeric" />
+          </View>
+          <View style={{ flex: 2 }}>
+            <TextInput style={s.input} placeholderTextColor="#555" value={form.opened_at_time} onChangeText={v => update('opened_at_time', v)} placeholder="HH:MM" keyboardType="numeric" />
+          </View>
         </View>
 
         <Text style={s.label}>Setup</Text>

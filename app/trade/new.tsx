@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
+import { nowDateStr, nowTimeStr, parseDateTimeToISO } from '../../src/lib/datetime'
 import type { TradingAccount, StrategyProfile, TagDefinition, ChecklistItem } from '../../src/types'
 
 export default function NewTradeScreen() {
@@ -32,8 +33,8 @@ export default function NewTradeScreen() {
     notes: '',
     trade_data_quality: 'live' as string,
     position_size: '',
-    backtest_date: '',
-    backtest_time: '',
+    trade_date: nowDateStr(),
+    trade_time: nowTimeStr(),
   })
 
   useEffect(() => {
@@ -135,13 +136,7 @@ export default function NewTradeScreen() {
       ? parseFloat(form.position_size)
       : riskPerUnit > 0 ? riskAmount / riskPerUnit : 0
 
-    let openedAt = new Date().toISOString()
-    if (form.trade_data_quality === 'visual_backtest' && form.backtest_date) {
-      const [day, month, year] = form.backtest_date.split('.')
-      const time = form.backtest_time || '00:00'
-      const parsed = new Date(`${year}-${month}-${day}T${time}:00`)
-      if (!isNaN(parsed.getTime())) openedAt = parsed.toISOString()
-    }
+    const openedAt = parseDateTimeToISO(form.trade_date, form.trade_time)
 
     setSaving(true)
     const { data: tradeData, error } = await supabase.from('trades').insert({
@@ -381,29 +376,15 @@ export default function NewTradeScreen() {
           ))}
         </View>
 
-        {form.trade_data_quality === 'visual_backtest' && (
-          <>
-            <Label text="Handelszeitpunkt" />
-            <View style={s.row2}>
-              <View style={{ flex: 3 }}>
-                <Input
-                  value={form.backtest_date}
-                  onChangeText={v => update('backtest_date', v)}
-                  placeholder="TT.MM.JJJJ"
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={{ flex: 2 }}>
-                <Input
-                  value={form.backtest_time}
-                  onChangeText={v => update('backtest_time', v)}
-                  placeholder="HH:MM"
-                  keyboardType="numeric"
-                />
-              </View>
-            </View>
-          </>
-        )}
+        <Label text="Handelszeitpunkt" />
+        <View style={s.row2}>
+          <View style={{ flex: 3 }}>
+            <Input value={form.trade_date} onChangeText={v => update('trade_date', v)} placeholder="TT.MM.JJJJ" keyboardType="numeric" />
+          </View>
+          <View style={{ flex: 2 }}>
+            <Input value={form.trade_time} onChangeText={v => update('trade_time', v)} placeholder="HH:MM" keyboardType="numeric" />
+          </View>
+        </View>
 
         <Label text="Setup" />
         <Input value={form.setup} onChangeText={v => update('setup', v)} placeholder="z.B. HTF Zone + M5 Reaction" />
