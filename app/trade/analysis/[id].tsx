@@ -13,6 +13,9 @@ import type { MFEMAEResult } from '../../../src/lib/binance'
 
 type Phase = 'loading' | 'prompt' | 'analyzing' | 'result' | 'error'
 
+const PROMPT_INSTRUCTIONS_KEY = 'analysis_prompt_instructions'
+const INSTRUCTIONS_START = '\n\nGib eine strukturierte Analyse'
+
 export default function TradeAnalysisScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
@@ -30,6 +33,7 @@ export default function TradeAnalysisScreen() {
   const [strategyEdit, setStrategyEdit] = useState('')
   const [strategyEditOpen, setStrategyEditOpen] = useState(false)
   const [strategySaving, setStrategySaving] = useState(false)
+  const [hasCustomTemplate, setHasCustomTemplate] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -74,9 +78,18 @@ export default function TradeAnalysisScreen() {
         }
       }
 
-      // Build default prompt and show editor
+      // Build fresh prompt, then apply saved instructions if available
       const generated = buildAnalysisPrompt(t, loadedTags, loadedOhlcv, loadedStrategy, loadedEvents)
-      setPromptText(generated)
+      const savedInstructions = await AsyncStorage.getItem(PROMPT_INSTRUCTIONS_KEY)
+      if (savedInstructions) {
+        const sepIdx = generated.indexOf(INSTRUCTIONS_START)
+        const context = sepIdx >= 0 ? generated.slice(0, sepIdx) : generated
+        setPromptText(context + savedInstructions)
+        setHasCustomTemplate(true)
+      } else {
+        setPromptText(generated)
+        setHasCustomTemplate(false)
+      }
       setStatus('')
       setPhase('prompt')
     }
@@ -111,6 +124,20 @@ export default function TradeAnalysisScreen() {
     setPhase('prompt')
     setAnalysis(null)
     setError(null)
+  }
+
+  async function savePromptTemplate() {
+    const sepIdx = promptText.indexOf(INSTRUCTIONS_START)
+    const instructions = sepIdx >= 0 ? promptText.slice(sepIdx) : promptText
+    await AsyncStorage.setItem(PROMPT_INSTRUCTIONS_KEY, instructions)
+    setHasCustomTemplate(true)
+    Alert.alert('Gespeichert', 'Anweisungen als Vorlage gespeichert. Wird bei jedem neuen Trade geladen.')
+  }
+
+  async function resetPromptTemplate() {
+    await AsyncStorage.removeItem(PROMPT_INSTRUCTIONS_KEY)
+    setHasCustomTemplate(false)
+    Alert.alert('Zurückgesetzt', 'Standard-Prompt wird wieder verwendet.')
   }
 
   function openStrategyEdit() {
@@ -172,7 +199,15 @@ export default function TradeAnalysisScreen() {
 
         {phase === 'prompt' && (
           <>
-            <Text style={s.promptLabel}>Prompt bearbeiten</Text>
+            <View style={s.promptLabelRow}>
+              <Text style={s.promptLabel}>Prompt bearbeiten</Text>
+              {hasCustomTemplate && (
+                <View style={s.customBadge}>
+                  <Feather name="bookmark" size={11} color="#f59e0b" />
+                  <Text style={s.customBadgeText}>Vorlage aktiv</Text>
+                </View>
+              )}
+            </View>
             <TextInput
               style={s.promptInput}
               value={promptText}
@@ -181,6 +216,18 @@ export default function TradeAnalysisScreen() {
               placeholderTextColor="#555"
               textAlignVertical="top"
             />
+            <View style={s.templateBtns}>
+              <TouchableOpacity style={s.templateBtn} onPress={savePromptTemplate}>
+                <Feather name="bookmark" size={13} color="#f59e0b" />
+                <Text style={s.templateBtnText}>Als Vorlage speichern</Text>
+              </TouchableOpacity>
+              {hasCustomTemplate && (
+                <TouchableOpacity style={s.templateBtn} onPress={resetPromptTemplate}>
+                  <Feather name="rotate-ccw" size={13} color="#666" />
+                  <Text style={[s.templateBtnText, { color: '#666' }]}>Standard</Text>
+                </TouchableOpacity>
+              )}
+            </View>
             <TouchableOpacity style={s.analyzeBtn} onPress={runAnalysis} disabled={!hasKey}>
               <Feather name="cpu" size={18} color="#000" />
               <Text style={s.analyzeBtnText}>Analysieren</Text>
@@ -280,7 +327,13 @@ const s = StyleSheet.create({
   stratMeta: { color: '#818cf8', fontSize: 12, marginTop: 4 },
   warningBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1a1500', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#f59e0b33', marginBottom: 16 },
   warningText: { color: '#f59e0b', fontSize: 13, flex: 1 },
-  promptLabel: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  promptLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  promptLabel: { color: '#888', fontSize: 12, fontWeight: '600' },
+  customBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#1a1500', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: '#f59e0b44' },
+  customBadgeText: { color: '#f59e0b', fontSize: 11, fontWeight: '600' },
+  templateBtns: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  templateBtn: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  templateBtnText: { color: '#f59e0b', fontSize: 12, fontWeight: '600' },
   promptInput: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, color: '#fff', fontSize: 13, borderWidth: 1, borderColor: '#2a2a2a', minHeight: 300, lineHeight: 20, marginBottom: 14 },
   analyzeBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#22c55e', borderRadius: 12, padding: 16, marginBottom: 16 },
   analyzeBtnText: { color: '#000', fontSize: 16, fontWeight: '700' },
