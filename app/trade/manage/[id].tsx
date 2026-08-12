@@ -246,8 +246,9 @@ export default function ManageTradeScreen() {
     if (ev.event_type === 'sl_moved_to_be') currentSL = trade.entry_price
     if (ev.event_type === 'sl_moved_manual') currentSL = ev.price
     if ((ev.event_type === 'partial_close' || ev.event_type === 'tp_hit') && ev.size_percent)
-      remainingFraction *= (1 - ev.size_percent / 100)
+      remainingFraction -= ev.size_percent / 100
   }
+  remainingFraction = Math.max(0, remainingFraction)
   const remainingSize = (trade.position_size ?? 0) * remainingFraction
   const currentRiskAmount = remainingSize * Math.abs(trade.entry_price - currentSL)
   const currentRiskPct = accountBalance > 0 ? (currentRiskAmount / accountBalance) * 100 : 0
@@ -391,8 +392,8 @@ export default function ManageTradeScreen() {
               <TextInput style={s.panelInput} value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholderTextColor="#555" placeholder="0.00" />
             </>)}
             {activeAction?.showSize && (<>
-              <Text style={s.inputLabel}>Grösse %</Text>
-              <TextInput style={s.panelInput} value={sizePercent} onChangeText={setSizePercent} keyboardType="decimal-pad" placeholderTextColor="#555" placeholder="z.B. 50" />
+              <Text style={s.inputLabel}>Anteil % (der Gesamtposition)</Text>
+              <TextInput style={s.panelInput} value={sizePercent} onChangeText={setSizePercent} keyboardType="decimal-pad" placeholderTextColor="#555" placeholder="z.B. 33" />
             </>)}
             <Text style={s.inputLabel}>Notiz (optional)</Text>
             <TextInput style={[s.panelInput, s.inputMultiline]} value={note} onChangeText={setNote} multiline numberOfLines={3} placeholderTextColor="#555" placeholder="Notiz..." textAlignVertical="top" />
@@ -423,8 +424,8 @@ export default function ManageTradeScreen() {
               <TextInput style={s.panelInput} value={editPrice} onChangeText={setEditPrice} keyboardType="decimal-pad" placeholderTextColor="#555" placeholder="0.00" />
             </>)}
             {editAction?.showSize && (<>
-              <Text style={s.inputLabel}>Grösse %</Text>
-              <TextInput style={s.panelInput} value={editSize} onChangeText={setEditSize} keyboardType="decimal-pad" placeholderTextColor="#555" placeholder="z.B. 50" />
+              <Text style={s.inputLabel}>Anteil % (der Gesamtposition)</Text>
+              <TextInput style={s.panelInput} value={editSize} onChangeText={setEditSize} keyboardType="decimal-pad" placeholderTextColor="#555" placeholder="z.B. 33" />
             </>)}
             <Text style={s.inputLabel}>Notiz</Text>
             <TextInput style={[s.panelInput, s.inputMultiline]} value={editNote} onChangeText={setEditNote} multiline numberOfLines={3} placeholderTextColor="#555" placeholder="Notiz..." textAlignVertical="top" />

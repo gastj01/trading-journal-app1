@@ -26,13 +26,14 @@ export function calcWeightedR(
   let totalR = 0
 
   for (const ev of partials) {
-    const fraction = remaining * (ev.size_percent! / 100)
+    const fraction = ev.size_percent! / 100
     const evR = isLong
       ? (ev.price! - trade.entry_price) / risk
       : (trade.entry_price - ev.price!) / risk
     totalR += evR * fraction
     remaining -= fraction
   }
+  remaining = Math.max(0, remaining)
 
   if (remaining > 0.001) {
     const finalR = isLong
