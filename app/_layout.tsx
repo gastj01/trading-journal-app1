@@ -5,6 +5,7 @@ import { supabase } from '../src/lib/supabase'
 import type { Session } from '@supabase/supabase-js'
 import { useRouter, useSegments } from 'expo-router'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
+import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { enableScreens } from 'react-native-screens'
 import { View, Text, ScrollView, Alert } from 'react-native'
 
@@ -71,19 +72,21 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ErrorBoundary>
-        <StatusBar style="light" />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="trade/[id]" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="trade/new" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="strategy/new" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="trade/edit/[id]" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="trade/manage/[id]" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="account/new" options={{ presentation: 'modal' }} />
-        </Stack>
-      </ErrorBoundary>
+      <SafeAreaProvider>
+        <ErrorBoundary>
+          <StatusBar style="light" />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="trade/[id]" options={{ presentation: 'card' }} />
+            <Stack.Screen name="trade/new" options={{ presentation: 'card' }} />
+            <Stack.Screen name="strategy/new" options={{ presentation: 'card' }} />
+            <Stack.Screen name="trade/edit/[id]" options={{ presentation: 'card' }} />
+            <Stack.Screen name="trade/manage/[id]" options={{ presentation: 'card' }} />
+            <Stack.Screen name="account/new" options={{ presentation: 'card' }} />
+          </Stack>
+        </ErrorBoundary>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   )
 }
