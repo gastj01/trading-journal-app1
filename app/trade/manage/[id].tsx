@@ -329,8 +329,8 @@ export default function ManageTradeScreen() {
                       setActiveAction(tpAction)
                       setNote('')
                       setSizePercent(String(pp.quantity_percent))
-                      setEventDate(nowDateStr())
-                      setEventTime(nowTimeStr())
+                      setEventDate(trade ? isoToDateStr(trade.opened_at) : nowDateStr())
+                      setEventTime(trade ? isoToTimeStr(trade.opened_at) : nowTimeStr())
                       setPrice(String(pp.target_price))
                     }}
                   >
