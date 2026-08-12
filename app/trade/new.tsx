@@ -127,7 +127,11 @@ export default function NewTradeScreen() {
       return
     }
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!user) {
+      setSaving(false)
+      Alert.alert('Fehler', 'Session abgelaufen. Bitte neu einloggen.')
+      return
+    }
 
     const entry = parseFloat(form.entry_price)
     const sl = parseFloat(form.stop_loss)

@@ -32,14 +32,18 @@ export default function JournalScreen() {
   async function load() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const [{ data: tradeData }, { data: strats }, { data: tagDefs }, { data: assigns }, { data: evData }] = await Promise.all([
+    const [{ data: tradeData, error: tradeErr }, { data: strats }, { data: tagDefs }, { data: assigns }, { data: evData }] = await Promise.all([
       supabase.from('trades').select('*').eq('user_id', user.id).order('opened_at', { ascending: false }),
       supabase.from('strategy_profiles').select('*').eq('user_id', user.id).order('name'),
       supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id).order('tag_type'),
       supabase.from('trade_tag_assignments').select('trade_id, tag_id').eq('user_id', user.id),
       supabase.from('trade_management_events').select('*').eq('user_id', user.id),
     ])
-    const loadedTrades = tradeData ?? []
+    if (tradeErr || tradeData === null) {
+      setLoading(false)
+      return
+    }
+    const loadedTrades = tradeData
     const evMap = new Map<string, ManagementEvent[]>()
     for (const ev of (evData ?? [])) {
       if (!evMap.has(ev.trade_id)) evMap.set(ev.trade_id, [])
