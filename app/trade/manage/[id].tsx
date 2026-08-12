@@ -10,6 +10,7 @@ import { supabase } from '../../../src/lib/supabase'
 import { fetchCandles, detectManagementEvents, normalizeSymbol, normalizeInterval, type DetectedEvent } from '../../../src/lib/binance'
 import { nowDateStr, nowTimeStr, isoToDateStr, isoToTimeStr, parseDateTimeToISO } from '../../../src/lib/datetime'
 import { DateTimeInputs } from '../../../src/components/DateTimeInputs'
+import { CandleTimePicker } from '../../../src/components/CandleTimePicker'
 import type { Trade, ManagementEvent, PartialProfit } from '../../../src/types'
 
 type ActionKey = 'sl_moved_to_be' | 'sl_moved_manual' | 'partial_close' | 'tp_hit' | 'manual_exit' | 'sl_hit' | 'note'
@@ -80,6 +81,10 @@ export default function ManageTradeScreen() {
   const [editDate, setEditDate] = useState('')
   const [editTime, setEditTime] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
+
+  // Candle time picker
+  const [showCandlePicker, setShowCandlePicker] = useState(false)
+  const [candlePickerForEdit, setCandlePickerForEdit] = useState(false)
 
   // Candle detection
   const [detecting, setDetecting] = useState(false)
@@ -387,6 +392,12 @@ export default function ManageTradeScreen() {
             <Text style={s.panelTitle}>{activeAction?.label}</Text>
             <Text style={s.inputLabel}>Zeitpunkt</Text>
             <DateTimeInputs date={eventDate} time={eventTime} onDateChange={setEventDate} onTimeChange={setEventTime} inputStyle={s.panelInput} />
+            {activeAction?.showPrice && price ? (
+              <TouchableOpacity style={s.candlePickerBtn} onPress={() => { setCandlePickerForEdit(false); setShowCandlePicker(true) }}>
+                <Feather name="clock" size={13} color="#3b82f6" />
+                <Text style={s.candlePickerBtnTxt}>Genauen Zeitpunkt aus Kerzen suchen</Text>
+              </TouchableOpacity>
+            ) : null}
             {activeAction?.showPrice && (<>
               <Text style={s.inputLabel}>Preis</Text>
               <TextInput style={s.panelInput} value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholderTextColor="#555" placeholder="0.00" />
@@ -419,6 +430,12 @@ export default function ManageTradeScreen() {
             </View>
             <Text style={s.inputLabel}>Zeitpunkt</Text>
             <DateTimeInputs date={editDate} time={editTime} onDateChange={setEditDate} onTimeChange={setEditTime} inputStyle={s.panelInput} />
+            {editAction?.showPrice && editPrice ? (
+              <TouchableOpacity style={s.candlePickerBtn} onPress={() => { setCandlePickerForEdit(true); setShowCandlePicker(true) }}>
+                <Feather name="clock" size={13} color="#3b82f6" />
+                <Text style={s.candlePickerBtnTxt}>Genauen Zeitpunkt aus Kerzen suchen</Text>
+              </TouchableOpacity>
+            ) : null}
             {editAction?.showPrice && (<>
               <Text style={s.inputLabel}>Preis</Text>
               <TextInput style={s.panelInput} value={editPrice} onChangeText={setEditPrice} keyboardType="decimal-pad" placeholderTextColor="#555" placeholder="0.00" />
@@ -436,6 +453,27 @@ export default function ManageTradeScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Candle time picker */}
+      {trade && (
+        <CandleTimePicker
+          visible={showCandlePicker}
+          symbol={trade.symbol}
+          price={candlePickerForEdit ? (parseFloat(editPrice) || 0) : (parseFloat(price) || 0)}
+          side={trade.side}
+          initialDate={candlePickerForEdit ? editDate : eventDate}
+          onSelect={candle => {
+            const d = new Date(candle.openTime)
+            const pad = (n: number) => String(n).padStart(2, '0')
+            const dateStr = `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`
+            const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+            if (candlePickerForEdit) { setEditDate(dateStr); setEditTime(timeStr) }
+            else { setEventDate(dateStr); setEventTime(timeStr) }
+            setShowCandlePicker(false)
+          }}
+          onClose={() => setShowCandlePicker(false)}
+        />
+      )}
 
       {/* Detected events modal */}
       <Modal visible={showDetectedModal} transparent animationType="slide" onRequestClose={() => setShowDetectedModal(false)}>
@@ -498,6 +536,8 @@ const s = StyleSheet.create({
   beBadge: { color: '#22c55e', fontSize: 13, fontWeight: '700' },
   candleBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1a1a00', borderWidth: 1, borderColor: '#f59e0b44', borderRadius: 10, padding: 12, marginBottom: 16 },
   candleBtnText: { color: '#f59e0b', fontSize: 13, fontWeight: '600' },
+  candlePickerBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 },
+  candlePickerBtnTxt: { color: '#3b82f6', fontSize: 13, fontWeight: '600' },
   sectionTitle: { color: '#555', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 },
   tpGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
   tpBtn: { backgroundColor: '#0a1f0f', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#22c55e33', minWidth: '30%', flex: 1, alignItems: 'center', gap: 2 },

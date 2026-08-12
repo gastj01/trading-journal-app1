@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
 import { nowDateStr, nowTimeStr, parseDateTimeToISO } from '../../src/lib/datetime'
 import { DateTimeInputs } from '../../src/components/DateTimeInputs'
+import { CandleTimePicker } from '../../src/components/CandleTimePicker'
 import type { TradingAccount, StrategyProfile, TagDefinition, ChecklistItem } from '../../src/types'
 
 export default function NewTradeScreen() {
@@ -17,6 +18,7 @@ export default function NewTradeScreen() {
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
   const [rulesExpanded, setRulesExpanded] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [showCandlePicker, setShowCandlePicker] = useState(false)
   const [tpLevels, setTpLevels] = useState<{ price: string; qty: string }[]>([])
   const [bePrice, setBePrice] = useState('')
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
@@ -425,6 +427,12 @@ export default function NewTradeScreen() {
           onDateChange={v => update('trade_date', v)}
           onTimeChange={v => update('trade_time', v)}
         />
+        {!!form.entry_price && !!form.symbol && (
+          <TouchableOpacity style={s.candleBtn} onPress={() => setShowCandlePicker(true)}>
+            <Feather name="clock" size={14} color="#3b82f6" />
+            <Text style={s.candleBtnTxt}>Genauen Zeitpunkt aus Kerzen suchen</Text>
+          </TouchableOpacity>
+        )}
 
         <Label text="Setup" />
         <Input value={form.setup} onChangeText={v => update('setup', v)} placeholder="z.B. HTF Zone + M5 Reaction" />
@@ -460,6 +468,23 @@ export default function NewTradeScreen() {
           </>
         )}
       </ScrollView>
+
+      <CandleTimePicker
+        visible={showCandlePicker}
+        symbol={form.symbol}
+        price={parseFloat(form.entry_price) || 0}
+        side={form.side}
+        initialDate={form.trade_date}
+        onSelect={candle => {
+          const d = new Date(candle.openTime)
+          const pad = (n: number) => String(n).padStart(2, '0')
+          const dateStr = `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`
+          const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+          update('trade_date', dateStr)
+          update('trade_time', timeStr)
+        }}
+        onClose={() => setShowCandlePicker(false)}
+      />
     </SafeAreaView>
   )
 }
@@ -528,4 +553,6 @@ const s = StyleSheet.create({
   checklistItemChecked: { color: '#22c55e' },
   catBadge: { backgroundColor: '#252525', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   catBadgeText: { color: '#888', fontSize: 11 },
+  candleBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 2 },
+  candleBtnTxt: { color: '#3b82f6', fontSize: 13, fontWeight: '600' },
 })
