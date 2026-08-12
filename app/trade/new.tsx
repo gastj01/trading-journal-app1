@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
 import { nowDateStr, nowTimeStr, parseDateTimeToISO } from '../../src/lib/datetime'
+import { DateTimeInputs } from '../../src/components/DateTimeInputs'
 import type { TradingAccount, StrategyProfile, TagDefinition, ChecklistItem } from '../../src/types'
 
 export default function NewTradeScreen() {
@@ -377,14 +378,11 @@ export default function NewTradeScreen() {
         </View>
 
         <Label text="Handelszeitpunkt" />
-        <View style={s.row2}>
-          <View style={{ flex: 3 }}>
-            <Input value={form.trade_date} onChangeText={v => update('trade_date', v)} placeholder="TT.MM.JJJJ" keyboardType="numeric" />
-          </View>
-          <View style={{ flex: 2 }}>
-            <Input value={form.trade_time} onChangeText={v => update('trade_time', v)} placeholder="HH:MM" keyboardType="numeric" />
-          </View>
-        </View>
+        <DateTimeInputs
+          date={form.trade_date} time={form.trade_time}
+          onDateChange={v => update('trade_date', v)}
+          onTimeChange={v => update('trade_time', v)}
+        />
 
         <Label text="Setup" />
         <Input value={form.setup} onChangeText={v => update('setup', v)} placeholder="z.B. HTF Zone + M5 Reaction" />

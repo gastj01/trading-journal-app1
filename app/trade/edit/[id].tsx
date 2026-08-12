@@ -7,6 +7,7 @@ import * as DocumentPicker from 'expo-document-picker'
 import * as FileSystem from 'expo-file-system/legacy'
 import { supabase } from '../../../src/lib/supabase'
 import { isoToDateStr, isoToTimeStr, parseDateTimeToISO } from '../../../src/lib/datetime'
+import { DateTimeInputs } from '../../../src/components/DateTimeInputs'
 import type { Trade, TagDefinition, StrategyProfile, ChecklistItem } from '../../../src/types'
 
 export default function EditTradeScreen() {
@@ -467,14 +468,11 @@ export default function EditTradeScreen() {
         </View>
 
         <Text style={s.label}>Handelszeitpunkt</Text>
-        <View style={s.row2}>
-          <View style={{ flex: 3 }}>
-            <TextInput style={s.input} placeholderTextColor="#555" value={form.opened_at_date} onChangeText={v => update('opened_at_date', v)} placeholder="TT.MM.JJJJ" keyboardType="numeric" />
-          </View>
-          <View style={{ flex: 2 }}>
-            <TextInput style={s.input} placeholderTextColor="#555" value={form.opened_at_time} onChangeText={v => update('opened_at_time', v)} placeholder="HH:MM" keyboardType="numeric" />
-          </View>
-        </View>
+        <DateTimeInputs
+          date={form.opened_at_date} time={form.opened_at_time}
+          onDateChange={v => update('opened_at_date', v)}
+          onTimeChange={v => update('opened_at_time', v)}
+        />
 
         <Text style={s.label}>Setup</Text>
         <TextInput style={s.input} placeholderTextColor="#555" placeholder="z.B. HTF Zone + M5 Reaction" value={form.setup} onChangeText={v => update('setup', v)} />
