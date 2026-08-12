@@ -281,7 +281,10 @@ export default function EditTradeScreen() {
     // Save TP levels (delete non-BE entries, reinsert)
     await supabase.from('trade_partial_profits').delete().eq('trade_id', id).gt('quantity_percent', 0)
     const ppRows = tpLevels
-      .filter(tp => parseFloat(tp.price) > 0 && parseFloat(tp.qty) > 0)
+      .filter(tp => {
+        const p = parseFloat(tp.price); const q = parseFloat(tp.qty)
+        return !isNaN(p) && p > 0 && !isNaN(q) && q > 0
+      })
       .map((tp, i) => ({
         trade_id: id,
         user_id: user.id,
@@ -290,7 +293,14 @@ export default function EditTradeScreen() {
         quantity_percent: parseFloat(tp.qty),
         filled: false,
       }))
-    if (ppRows.length > 0) await supabase.from('trade_partial_profits').insert(ppRows)
+    if (ppRows.length > 0) {
+      const { error: ppError } = await supabase.from('trade_partial_profits').insert(ppRows)
+      if (ppError) {
+        setSaving(false)
+        Alert.alert('TP Fehler', ppError.message)
+        return
+      }
+    }
 
     setSaving(false)
     router.back()

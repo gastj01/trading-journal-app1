@@ -201,12 +201,22 @@ export default function NewTradeScreen() {
       tpLevels.forEach((tp, i) => {
         const p = parseFloat(tp.price)
         const q = parseFloat(tp.qty)
-        if (p > 0 && q > 0) ppRows.push({ trade_id: tradeData.id, user_id: user.id, label: `TP${i + 1}`, target_price: p, quantity_percent: q, filled: false })
+        if (!isNaN(p) && p > 0 && !isNaN(q) && q > 0) {
+          ppRows.push({ trade_id: tradeData.id, user_id: user.id, label: `TP${i + 1}`, target_price: p, quantity_percent: q, filled: false })
+        }
       })
-      if (bePrice && parseFloat(bePrice) > 0) {
-        ppRows.push({ trade_id: tradeData.id, user_id: user.id, label: 'BE', target_price: parseFloat(bePrice), quantity_percent: 0, filled: false })
+      const beParsed = parseFloat(bePrice)
+      if (bePrice && !isNaN(beParsed) && beParsed > 0) {
+        ppRows.push({ trade_id: tradeData.id, user_id: user.id, label: 'BE', target_price: beParsed, quantity_percent: 0, filled: false })
       }
-      if (ppRows.length > 0) await supabase.from('trade_partial_profits').insert(ppRows)
+      if (ppRows.length > 0) {
+        const { error: ppError } = await supabase.from('trade_partial_profits').insert(ppRows)
+        if (ppError) {
+          setSaving(false)
+          Alert.alert('TP/BE Fehler', ppError.message)
+          return
+        }
+      }
     }
 
     setSaving(false)
