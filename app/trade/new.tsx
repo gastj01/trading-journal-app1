@@ -92,7 +92,7 @@ export default function NewTradeScreen() {
       const sl = parseFloat(next.stop_loss) || 0
       const riskPerUnit = Math.abs(entry - sl)
       const posSize = parseFloat(next.position_size) || 0
-      if (posSize > 0 && riskPerUnit > 0) {
+      if (posSize > 0 && riskPerUnit > 0 && key !== 'risk_percent') {
         next.risk_percent = ((posSize * riskPerUnit / balance) * 100).toFixed(2)
       }
       return next

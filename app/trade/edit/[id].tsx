@@ -24,6 +24,7 @@ export default function EditTradeScreen() {
   const [rulesExpanded, setRulesExpanded] = useState(false)
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
+  const [tpLevels, setTpLevels] = useState<{ price: string; qty: string }[]>([])
   const [form, setForm] = useState({
     symbol: '',
     side: 'long' as 'long' | 'short',
@@ -48,14 +49,20 @@ export default function EditTradeScreen() {
       if (!id) return
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const [{ data }, { data: tagDefs }, { data: assignments }, { data: strats }, { data: links }, { data: responses }] = await Promise.all([
+      const [{ data }, { data: tagDefs }, { data: assignments }, { data: strats }, { data: links }, { data: responses }, { data: ppData }] = await Promise.all([
         supabase.from('trades').select('*').eq('id', id).single(),
         supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id).order('tag_type'),
         supabase.from('trade_tag_assignments').select('tag_id').eq('trade_id', id),
         supabase.from('strategy_profiles').select('*').eq('user_id', user.id),
         supabase.from('strategy_tag_links').select('tag_id, strategy_id').eq('user_id', user.id),
         supabase.from('trade_checklist_responses').select('checklist_item_id, status').eq('trade_id', id),
+        supabase.from('trade_partial_profits').select('*').eq('trade_id', id).order('target_price'),
       ])
+      setTpLevels(
+        (ppData ?? [])
+          .filter((pp: any) => pp.quantity_percent > 0)
+          .map((pp: any) => ({ price: String(pp.target_price), qty: String(pp.quantity_percent) }))
+      )
       if (!data) return
       setTrade(data)
       // Load account balance for live risk calculation
@@ -137,7 +144,7 @@ export default function EditTradeScreen() {
       const sl = parseFloat(next.stop_loss) || 0
       const riskPerUnit = Math.abs(entry - sl)
       const posSize = parseFloat(next.position_size) || 0
-      if (posSize > 0 && riskPerUnit > 0) {
+      if (posSize > 0 && riskPerUnit > 0 && key !== 'risk_percent') {
         next.risk_percent = ((posSize * riskPerUnit / accountBalance) * 100).toFixed(2)
       }
       return next
@@ -218,6 +225,10 @@ export default function EditTradeScreen() {
       Alert.alert('Fehler', 'Entry und Stop Loss sind Pflichtfelder.')
       return
     }
+    if (form.status === 'closed' && !form.exit_price) {
+      Alert.alert('Fehler', 'Bei Status "Geschlossen" muss ein Exit-Preis angegeben werden.')
+      return
+    }
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
@@ -266,6 +277,20 @@ export default function EditTradeScreen() {
         }))
       )
     }
+
+    // Save TP levels (delete non-BE entries, reinsert)
+    await supabase.from('trade_partial_profits').delete().eq('trade_id', id).gt('quantity_percent', 0)
+    const ppRows = tpLevels
+      .filter(tp => parseFloat(tp.price) > 0 && parseFloat(tp.qty) > 0)
+      .map((tp, i) => ({
+        trade_id: id,
+        user_id: user.id,
+        label: `TP${i + 1}`,
+        target_price: parseFloat(tp.price),
+        quantity_percent: parseFloat(tp.qty),
+        filled: false,
+      }))
+    if (ppRows.length > 0) await supabase.from('trade_partial_profits').insert(ppRows)
 
     setSaving(false)
     router.back()
@@ -353,6 +378,25 @@ export default function EditTradeScreen() {
 
         <Text style={s.label}>Exit (optional)</Text>
         <TextInput style={s.input} placeholderTextColor="#555" value={form.exit_price} onChangeText={v => update('exit_price', v)} keyboardType="decimal-pad" />
+
+        <Text style={s.label}>Take-Profit Levels</Text>
+        {tpLevels.map((tp, i) => (
+          <View key={i} style={s.tpRow}>
+            <View style={{ flex: 2 }}>
+              <TextInput style={s.input} placeholderTextColor="#555" value={tp.price} onChangeText={v => setTpLevels(prev => prev.map((t, j) => j === i ? { ...t, price: v } : t))} keyboardType="decimal-pad" placeholder={`TP${i + 1} Preis`} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <TextInput style={s.input} placeholderTextColor="#555" value={tp.qty} onChangeText={v => setTpLevels(prev => prev.map((t, j) => j === i ? { ...t, qty: v } : t))} keyboardType="decimal-pad" placeholder="%" />
+            </View>
+            <TouchableOpacity onPress={() => setTpLevels(prev => prev.filter((_, j) => j !== i))} style={s.tpRemove}>
+              <Feather name="x" size={16} color="#ef4444" />
+            </TouchableOpacity>
+          </View>
+        ))}
+        <TouchableOpacity style={s.addTpBtn} onPress={() => setTpLevels(prev => [...prev, { price: '', qty: '' }])}>
+          <Feather name="plus" size={14} color="#22c55e" />
+          <Text style={s.addTpText}>TP hinzufügen</Text>
+        </TouchableOpacity>
 
         {(() => {
           const calcEntry = parseFloat(form.entry_price) || 0
@@ -574,6 +618,10 @@ const s = StyleSheet.create({
   calcRow: { flexDirection: 'row', gap: 16, paddingHorizontal: 2, marginTop: 4 },
   calcText: { color: '#22c55e', fontSize: 12, fontWeight: '600' },
   calcTextMuted: { color: '#555', fontSize: 12 },
+  tpRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 6 },
+  tpRemove: { padding: 8 },
+  addTpBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
+  addTpText: { color: '#22c55e', fontSize: 13, fontWeight: '600' },
   // Checklist
   checklistSection: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#2a2a2a' },
   checklistSectionTitle: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 8 },
