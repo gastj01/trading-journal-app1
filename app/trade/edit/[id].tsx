@@ -398,7 +398,10 @@ export default function EditTradeScreen() {
         </View>
 
         <Text style={s.label}>Exit (optional)</Text>
-        <TextInput style={s.input} placeholderTextColor="#555" value={form.exit_price} onChangeText={v => update('exit_price', v)} keyboardType="decimal-pad" />
+        <TextInput style={s.input} placeholderTextColor="#555" value={form.exit_price} onChangeText={v => {
+          update('exit_price', v)
+          if (v) setForm(f => ({ ...f, status: 'closed' }))
+        }} keyboardType="decimal-pad" />
 
         <Text style={s.label}>Take-Profit Levels</Text>
         {tpLevels.map((tp, i) => (

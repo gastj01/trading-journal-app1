@@ -164,12 +164,6 @@ export default function ManageTradeScreen() {
     if (activeAction.showPrice && !price) { Alert.alert('Fehler', 'Bitte Preis eingeben.'); return }
 
     const newSizePct = activeAction.showSize && sizePercent ? parseFloat(sizePercent) : 0
-    const existingPct = events
-      .filter(ev => ev.event_type === 'tp_hit' || ev.event_type === 'partial_close')
-      .reduce((sum, ev) => sum + (ev.size_percent ?? 0), 0)
-    const cumulativePct = existingPct + newSizePct
-    const isCumulativeClose = activeAction.key === 'tp_hit' && cumulativePct >= 98
-    const isClose = activeAction.closestrade || isCumulativeClose
     const iso = parseDateTimeToISO(eventDate, eventTime)
 
     setSaving(true)
@@ -184,8 +178,19 @@ export default function ManageTradeScreen() {
     })
     if (error) { setSaving(false); Alert.alert('Fehler', error.message); return }
 
+    // Re-query events from DB to get accurate cumulative total
+    const { data: freshEvents } = await supabase
+      .from('trade_management_events')
+      .select('event_type, size_percent')
+      .eq('trade_id', id)
+      .in('event_type', ['tp_hit', 'partial_close'])
+    const totalPct = (freshEvents ?? []).reduce((sum, ev) => sum + (ev.size_percent ?? 0), 0)
+    const isCumulativeClose = activeAction.key === 'tp_hit' && totalPct >= 98
+    const isClose = activeAction.closestrade || isCumulativeClose
+
     if (isClose) {
-      await supabase.from('trades').update({ status: 'closed', exit_price: parseFloat(price), closed_at: iso }).eq('id', id)
+      const { error: closeErr } = await supabase.from('trades').update({ status: 'closed', exit_price: parseFloat(price), closed_at: iso }).eq('id', id)
+      if (closeErr) Alert.alert('Fehler beim Schließen', closeErr.message)
     }
     setSaving(false); closeAction(); await loadData()
     if (isClose) router.back()
