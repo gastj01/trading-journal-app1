@@ -178,25 +178,31 @@ export default function ManageTradeScreen() {
     })
     if (error) { setSaving(false); Alert.alert('Fehler', error.message); return }
 
-    // Check if all TP price levels are now hit (price-based, independent of size_percent format)
+    // Check if all TP price levels are now hit
     let isCumulativeClose = false
     if (activeAction.key === 'tp_hit') {
       const { data: freshTpEvents } = await supabase
         .from('trade_management_events')
-        .select('price')
+        .select('price, size_percent')
         .eq('trade_id', id)
         .eq('event_type', 'tp_hit')
       const hitPrices = (freshTpEvents ?? []).map(ev => ev.price ?? 0)
-      const tpTargets = partialProfits.filter(pp => pp.quantity_percent > 0).map(pp => pp.target_price)
-      isCumulativeClose = tpTargets.length > 0 && tpTargets.every(tp =>
-        hitPrices.some(hp => Math.abs(hp - tp) < tp * 0.001)
+      const tpTargets = partialProfits.filter(pp => pp.quantity_percent > 0)
+      const allPricesHit = tpTargets.length > 0 && tpTargets.every(tp =>
+        hitPrices.some(hp => Math.abs(hp - tp.target_price) < Math.max(tp.target_price * 0.001, 0.01))
       )
+      const totalSizePct = (freshTpEvents ?? []).reduce((sum, ev) => sum + (ev.size_percent ?? 0), 0)
+      isCumulativeClose = allPricesHit || totalSizePct >= 98
     }
     const isClose = activeAction.closestrade || isCumulativeClose
 
     if (isClose) {
       const { error: closeErr } = await supabase.from('trades').update({ status: 'closed', exit_price: parseFloat(price), closed_at: iso }).eq('id', id)
-      if (closeErr) Alert.alert('Fehler beim Schließen', closeErr.message)
+      if (closeErr) {
+        setSaving(false)
+        Alert.alert('Fehler beim Schließen', closeErr.message)
+        return
+      }
     }
     setSaving(false); closeAction(); await loadData()
     if (isClose) router.back()
@@ -283,12 +289,29 @@ export default function ManageTradeScreen() {
     const toSave = detectedEvents.filter((_, i) => selectedDetected.has(i))
     if (toSave.length === 0) { setShowDetectedModal(false); return }
     setSavingDetected(true)
-    const lastClose = toSave.find(e => e.event_type === 'sl_hit' || (e.event_type === 'tp_hit' && e.size_percent === 100))
+    const lastClose = toSave.find(e => e.event_type === 'sl_hit' || e.event_type === 'manual_exit')
     const { error } = await supabase.from('trade_management_events').insert(
       toSave.map(ev => ({ trade_id: id, user_id: user.id, event_type: ev.event_type, event_time: ev.event_time, price: ev.price, size_percent: ev.size_percent, size_absolute: null, note: ev.note }))
     )
     if (error) { setSavingDetected(false); Alert.alert('Fehler', error.message); return }
-    if (lastClose) await supabase.from('trades').update({ status: 'closed', exit_price: lastClose.price, closed_at: lastClose.event_time }).eq('id', id)
+
+    // Check close: explicit sl_hit/manual_exit OR all TP targets hit
+    let closeEvent = lastClose ?? null
+    if (!closeEvent) {
+      const tpTargets = partialProfits.filter(pp => pp.quantity_percent > 0)
+      const { data: allTpEvents } = await supabase.from('trade_management_events').select('price, size_percent').eq('trade_id', id).eq('event_type', 'tp_hit')
+      const hitPrices = (allTpEvents ?? []).map(ev => ev.price ?? 0)
+      const totalSizePct = (allTpEvents ?? []).reduce((s, ev) => s + (ev.size_percent ?? 0), 0)
+      const allHit = tpTargets.length > 0 && (
+        tpTargets.every(tp => hitPrices.some(hp => Math.abs(hp - tp.target_price) < Math.max(tp.target_price * 0.001, 0.01)))
+        || totalSizePct >= 98
+      )
+      if (allHit) {
+        const lastTp = toSave.filter(e => e.event_type === 'tp_hit').at(-1)
+        if (lastTp) closeEvent = lastTp
+      }
+    }
+    if (closeEvent) await supabase.from('trades').update({ status: 'closed', exit_price: closeEvent.price, closed_at: closeEvent.event_time }).eq('id', id)
     setSavingDetected(false); setShowDetectedModal(false); await loadData()
   }
 

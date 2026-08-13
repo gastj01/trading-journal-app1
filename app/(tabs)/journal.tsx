@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { View, Text, FlatList, TouchableOpacity, TextInput, ScrollView, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
@@ -25,11 +25,16 @@ export default function JournalScreen() {
   const [loading, setLoading] = useState(true)
   const [eventsByTradeId, setEventsByTradeId] = useState<Map<string, ManagementEvent[]>>(new Map())
 
+  // Re-apply filters whenever trades or filter state changes (React 18 batches state updates automatically)
+  useEffect(() => {
+    applyFilters(trades, tagAssignments, search, status, side, selectedStrategyId, selectedTagId)
+  }, [trades, tagAssignments, search, status, side, selectedStrategyId, selectedTagId])
+
   useFocusEffect(useCallback(() => {
-    load()
+    loadData()
   }, []))
 
-  async function load() {
+  async function loadData() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const [{ data: tradeData, error: tradeErr }, { data: strats }, { data: tagDefs }, { data: assigns }, { data: evData }] = await Promise.all([
@@ -43,18 +48,16 @@ export default function JournalScreen() {
       setLoading(false)
       return
     }
-    const loadedTrades = tradeData
     const evMap = new Map<string, ManagementEvent[]>()
     for (const ev of (evData ?? [])) {
       if (!evMap.has(ev.trade_id)) evMap.set(ev.trade_id, [])
       evMap.get(ev.trade_id)!.push(ev)
     }
-    setTrades(loadedTrades)
     setStrategies(strats ?? [])
     setTags(tagDefs ?? [])
     setTagAssignments(assigns ?? [])
     setEventsByTradeId(evMap)
-    applyFilters(loadedTrades, assigns ?? [], search, status, side, selectedStrategyId, selectedTagId)
+    setTrades(tradeData)
     setLoading(false)
   }
 
@@ -87,17 +90,11 @@ export default function JournalScreen() {
   }
 
   function setFilter<T>(setter: (v: T) => void, key: 'status' | 'side' | 'strategy' | 'tag', value: T) {
-    let st = status, si = side, stratId = selectedStrategyId, tagId = selectedTagId, q = search
-    if (key === 'status') { setter(value); st = value as any }
-    if (key === 'side') { setter(value); si = value as any }
-    if (key === 'strategy') { setter(value); stratId = value as any }
-    if (key === 'tag') { setter(value); tagId = value as any }
-    applyFilters(trades, tagAssignments, q, st as FilterStatus, si as FilterSide, stratId as string, tagId as string)
+    setter(value)
   }
 
   function onSearch(q: string) {
     setSearch(q)
-    applyFilters(trades, tagAssignments, q, status, side, selectedStrategyId, selectedTagId)
   }
 
   const hasActiveFilter = status !== 'all' || side !== 'all' || !!selectedStrategyId || !!selectedTagId || !!search
