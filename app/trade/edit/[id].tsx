@@ -229,6 +229,17 @@ export default function EditTradeScreen() {
       Alert.alert('Fehler', 'Bei Status "Geschlossen" muss ein Exit-Preis angegeben werden.')
       return
     }
+    const validTps = tpLevels.filter(tp => {
+      const p = parseFloat(tp.price); const q = parseFloat(tp.qty)
+      return !isNaN(p) && p > 0 && !isNaN(q) && q > 0
+    })
+    if (validTps.length > 0) {
+      const totalPct = validTps.reduce((sum, tp) => sum + parseFloat(tp.qty), 0)
+      if (Math.round(totalPct) !== 100) {
+        Alert.alert('TP-Fehler', `TP-Anteile ergeben ${totalPct.toFixed(1)}% — müssen zusammen 100% ergeben.`)
+        return
+      }
+    }
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 

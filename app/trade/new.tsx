@@ -128,6 +128,20 @@ export default function NewTradeScreen() {
       Alert.alert('Fehler', 'Entry, SL und Konto sind Pflichtfelder.')
       return
     }
+
+    // Validate TP percentages before touching the DB
+    const validTps = tpLevels.filter(tp => {
+      const p = parseFloat(tp.price); const q = parseFloat(tp.qty)
+      return !isNaN(p) && p > 0 && !isNaN(q) && q > 0
+    })
+    if (validTps.length > 0) {
+      const totalPct = validTps.reduce((sum, tp) => sum + parseFloat(tp.qty), 0)
+      if (Math.round(totalPct) !== 100) {
+        Alert.alert('TP-Fehler', `TP-Anteile ergeben ${totalPct.toFixed(1)}% — müssen zusammen 100% ergeben.`)
+        return
+      }
+    }
+
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       setSaving(false)
@@ -212,8 +226,10 @@ export default function NewTradeScreen() {
       if (ppRows.length > 0) {
         const { error: ppError } = await supabase.from('trade_partial_profits').insert(ppRows)
         if (ppError) {
+          // Rollback: delete the trade so no orphan data remains
+          await supabase.from('trades').delete().eq('id', tradeData.id)
           setSaving(false)
-          Alert.alert('TP/BE Fehler', ppError.message)
+          Alert.alert('TP/BE Fehler', ppError.message + '\n\nTrade wurde nicht gespeichert.')
           return
         }
       }
