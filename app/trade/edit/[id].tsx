@@ -235,8 +235,8 @@ export default function EditTradeScreen() {
     })
     if (validTps.length > 0) {
       const totalPct = validTps.reduce((sum, tp) => sum + parseFloat(tp.qty), 0)
-      if (Math.round(totalPct) !== 100) {
-        Alert.alert('TP-Fehler', `TP-Anteile ergeben ${totalPct.toFixed(1)}% — müssen zusammen 100% ergeben.`)
+      if (Math.abs(totalPct - 100) > 2) {
+        Alert.alert('TP-Fehler', `TP-Anteile ergeben ${totalPct.toFixed(1)}% — müssen zusammen ~100% ergeben.`)
         return
       }
     }
