@@ -163,7 +163,13 @@ export default function ManageTradeScreen() {
     if (!user) return
     if (activeAction.showPrice && !price) { Alert.alert('Fehler', 'Bitte Preis eingeben.'); return }
 
-    const isClose = activeAction.closestrade || (activeAction.key === 'tp_hit' && parseFloat(sizePercent) === 100)
+    const newSizePct = activeAction.showSize && sizePercent ? parseFloat(sizePercent) : 0
+    const existingPct = events
+      .filter(ev => ev.event_type === 'tp_hit' || ev.event_type === 'partial_close')
+      .reduce((sum, ev) => sum + (ev.size_percent ?? 0), 0)
+    const cumulativePct = existingPct + newSizePct
+    const isCumulativeClose = activeAction.key === 'tp_hit' && cumulativePct >= 98
+    const isClose = activeAction.closestrade || isCumulativeClose
     const iso = parseDateTimeToISO(eventDate, eventTime)
 
     setSaving(true)
