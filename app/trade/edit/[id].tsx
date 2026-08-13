@@ -61,7 +61,7 @@ export default function EditTradeScreen() {
       setTpLevels(
         (ppData ?? [])
           .filter((pp: any) => pp.quantity_percent > 0)
-          .map((pp: any) => ({ price: String(pp.target_price), qty: String(pp.quantity_percent) }))
+          .map((pp: any) => ({ price: String(pp.target_price), qty: String(Math.round(pp.quantity_percent * 100)) }))
       )
       if (!data) return
       setTrade(data)
@@ -301,7 +301,7 @@ export default function EditTradeScreen() {
         user_id: user.id,
         label: `TP${i + 1}`,
         target_price: parseFloat(tp.price),
-        quantity_percent: parseFloat(tp.qty),
+        quantity_percent: parseFloat(tp.qty) / 100,
         filled: false,
       }))
     if (ppRows.length > 0) {

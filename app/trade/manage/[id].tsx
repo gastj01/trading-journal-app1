@@ -252,7 +252,7 @@ export default function ManageTradeScreen() {
       if (candles.length === 0) { Alert.alert('Keine Kerzen', 'Für diesen Zeitraum keine Kerzen gefunden.'); setDetecting(false); return }
       const tpLevels = partialProfits
         .filter(pp => pp.quantity_percent > 0)
-        .map(pp => ({ price: pp.target_price, quantity_percent: pp.quantity_percent }))
+        .map(pp => ({ price: pp.target_price, quantity_percent: Math.round(pp.quantity_percent * 100) }))
       const detected = detectManagementEvents(candles, trade.entry_price, trade.stop_loss, trade.side, tpLevels)
       if (detected.length === 0) { Alert.alert('Keine Events', 'SL und TPs wurden in diesem Zeitraum nicht getroffen.'); setDetecting(false); return }
       setDetectedEvents(detected)
@@ -370,7 +370,7 @@ export default function ManageTradeScreen() {
                       const tpAction = ACTIONS.find(a => a.key === 'tp_hit')!
                       setActiveAction(tpAction)
                       setNote('')
-                      setSizePercent(String(pp.quantity_percent))
+                      setSizePercent(String(Math.round(pp.quantity_percent * 100)))
                       setEventDate(trade ? isoToDateStr(trade.opened_at) : nowDateStr())
                       setEventTime(trade ? isoToTimeStr(trade.opened_at) : nowTimeStr())
                       setPrice(String(pp.target_price))
@@ -380,7 +380,7 @@ export default function ManageTradeScreen() {
                   >
                     <Text style={[s.tpLabel, alreadyHit && s.tpLabelHit]}>{pp.label}</Text>
                     <Text style={[s.tpPrice, alreadyHit && s.tpLabelHit]}>{pp.target_price.toLocaleString()}</Text>
-                    <Text style={s.tpMeta}>{pp.quantity_percent}% · {r !== null ? `+${r}R` : '—'}</Text>
+                    <Text style={s.tpMeta}>{Math.round(pp.quantity_percent * 100)}% · {r !== null ? `+${r}R` : '—'}</Text>
                     {loadingTpId === pp.id
                       ? <ActivityIndicator size="small" color="#22c55e" style={{ marginTop: 2 }} />
                       : alreadyHit && <Feather name="check" size={12} color="#22c55e" style={{ marginTop: 2 }} />}

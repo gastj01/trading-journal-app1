@@ -216,7 +216,7 @@ export default function NewTradeScreen() {
         const p = parseFloat(tp.price)
         const q = parseFloat(tp.qty)
         if (!isNaN(p) && p > 0 && !isNaN(q) && q > 0) {
-          ppRows.push({ trade_id: tradeData.id, user_id: user.id, label: `TP${i + 1}`, target_price: p, quantity_percent: q, filled: false })
+          ppRows.push({ trade_id: tradeData.id, user_id: user.id, label: `TP${i + 1}`, target_price: p, quantity_percent: q / 100, filled: false })
         }
       })
       const beParsed = parseFloat(bePrice)
