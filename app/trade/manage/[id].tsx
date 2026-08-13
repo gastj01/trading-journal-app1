@@ -85,6 +85,10 @@ export default function ManageTradeScreen() {
   // Candle time picker
   const [showCandlePicker, setShowCandlePicker] = useState(false)
   const [candlePickerForEdit, setCandlePickerForEdit] = useState(false)
+  const [candlePickerSearchPrice, setCandlePickerSearchPrice] = useState(0)
+
+  // Auto-detect TP time
+  const [loadingTpId, setLoadingTpId] = useState<string | null>(null)
 
   // Candle detection
   const [detecting, setDetecting] = useState(false)
@@ -117,7 +121,38 @@ export default function ManageTradeScreen() {
     const defaultDate = trade ? isoToDateStr(trade.opened_at) : nowDateStr()
     const defaultTime = trade ? isoToTimeStr(trade.opened_at) : nowTimeStr()
     setEventDate(defaultDate); setEventTime(defaultTime)
-    setPrice(action.prefilledPrice === 'entry' && trade ? String(trade.entry_price) : '')
+    const entryPrice = trade ? String(trade.entry_price) : ''
+    setPrice(action.prefilledPrice === 'entry' && trade ? entryPrice : '')
+    // For BE: CandleTimePicker should search at the BE trigger price (where BE gets activated),
+    // not the entry price (where SL moves to)
+    if (action.key === 'sl_moved_to_be') {
+      const beTrigger = partialProfits.find(pp => pp.quantity_percent === 0)
+      setCandlePickerSearchPrice(beTrigger ? beTrigger.target_price : (trade?.entry_price ?? 0))
+    } else {
+      setCandlePickerSearchPrice(0)
+    }
+  }
+
+  async function autoDetectTpTime(pp: PartialProfit) {
+    if (!trade) return
+    setLoadingTpId(pp.id)
+    try {
+      const symbol = normalizeSymbol(trade.symbol)
+      const interval = normalizeInterval(trade.timeframe) ?? '5m'
+      const startMs = new Date(trade.opened_at).getTime()
+      const endMs = trade.closed_at ? new Date(trade.closed_at).getTime() : Date.now()
+      const candles = await fetchCandles(symbol, interval, startMs, endMs)
+      const hit = candles.find(c =>
+        trade.side === 'long' ? c.high >= pp.target_price : c.low <= pp.target_price
+      )
+      if (hit) {
+        const d = new Date(hit.openTime)
+        const pad = (n: number) => String(n).padStart(2, '0')
+        setEventDate(`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`)
+        setEventTime(`${pad(d.getHours())}:${pad(d.getMinutes())}`)
+      }
+    } catch (_) {}
+    setLoadingTpId(null)
   }
 
   function closeAction() { setActiveAction(null) }
@@ -324,6 +359,7 @@ export default function ManageTradeScreen() {
                   <TouchableOpacity
                     key={pp.id}
                     style={[s.tpBtn, alreadyHit && s.tpBtnHit]}
+                    disabled={loadingTpId === pp.id}
                     onPress={() => {
                       const tpAction = ACTIONS.find(a => a.key === 'tp_hit')!
                       setActiveAction(tpAction)
@@ -332,12 +368,16 @@ export default function ManageTradeScreen() {
                       setEventDate(trade ? isoToDateStr(trade.opened_at) : nowDateStr())
                       setEventTime(trade ? isoToTimeStr(trade.opened_at) : nowTimeStr())
                       setPrice(String(pp.target_price))
+                      setCandlePickerSearchPrice(pp.target_price)
+                      autoDetectTpTime(pp)
                     }}
                   >
                     <Text style={[s.tpLabel, alreadyHit && s.tpLabelHit]}>{pp.label}</Text>
                     <Text style={[s.tpPrice, alreadyHit && s.tpLabelHit]}>{pp.target_price.toLocaleString()}</Text>
                     <Text style={s.tpMeta}>{pp.quantity_percent}% · {r !== null ? `+${r}R` : '—'}</Text>
-                    {alreadyHit && <Feather name="check" size={12} color="#22c55e" style={{ marginTop: 2 }} />}
+                    {loadingTpId === pp.id
+                      ? <ActivityIndicator size="small" color="#22c55e" style={{ marginTop: 2 }} />
+                      : alreadyHit && <Feather name="check" size={12} color="#22c55e" style={{ marginTop: 2 }} />}
                   </TouchableOpacity>
                 )
               })}
@@ -394,10 +434,14 @@ export default function ManageTradeScreen() {
             <Text style={s.panelTitle}>{activeAction?.label}</Text>
             <Text style={s.inputLabel}>Zeitpunkt</Text>
             <DateTimeInputs date={eventDate} time={eventTime} onDateChange={setEventDate} onTimeChange={setEventTime} inputStyle={s.panelInput} />
-            {activeAction?.showPrice && price ? (
+            {activeAction?.showPrice && (price || candlePickerSearchPrice > 0) ? (
               <TouchableOpacity style={s.candlePickerBtn} onPress={() => { setCandlePickerForEdit(false); setShowCandlePicker(true) }}>
                 <Feather name="clock" size={13} color="#3b82f6" />
-                <Text style={s.candlePickerBtnTxt}>Genauen Zeitpunkt aus Kerzen suchen</Text>
+                <Text style={s.candlePickerBtnTxt}>
+                  {candlePickerSearchPrice > 0 && candlePickerSearchPrice !== parseFloat(price)
+                    ? `Zeitpunkt suchen bei ${candlePickerSearchPrice.toLocaleString()}`
+                    : 'Genauen Zeitpunkt aus Kerzen suchen'}
+                </Text>
               </TouchableOpacity>
             ) : null}
             {activeAction?.showPrice && (<>
@@ -461,7 +505,9 @@ export default function ManageTradeScreen() {
         <CandleTimePicker
           visible={showCandlePicker}
           symbol={trade.symbol}
-          price={candlePickerForEdit ? (parseFloat(editPrice) || 0) : (parseFloat(price) || 0)}
+          price={candlePickerForEdit
+            ? (parseFloat(editPrice) || 0)
+            : (candlePickerSearchPrice || parseFloat(price) || 0)}
           side={trade.side}
           initialDate={candlePickerForEdit ? editDate : eventDate}
           onSelect={candle => {
