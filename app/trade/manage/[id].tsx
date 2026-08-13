@@ -178,14 +178,20 @@ export default function ManageTradeScreen() {
     })
     if (error) { setSaving(false); Alert.alert('Fehler', error.message); return }
 
-    // Re-query events from DB to get accurate cumulative total
-    const { data: freshEvents } = await supabase
-      .from('trade_management_events')
-      .select('event_type, size_percent')
-      .eq('trade_id', id)
-      .in('event_type', ['tp_hit', 'partial_close'])
-    const totalPct = (freshEvents ?? []).reduce((sum, ev) => sum + (ev.size_percent ?? 0), 0)
-    const isCumulativeClose = activeAction.key === 'tp_hit' && totalPct >= 98
+    // Check if all TP price levels are now hit (price-based, independent of size_percent format)
+    let isCumulativeClose = false
+    if (activeAction.key === 'tp_hit') {
+      const { data: freshTpEvents } = await supabase
+        .from('trade_management_events')
+        .select('price')
+        .eq('trade_id', id)
+        .eq('event_type', 'tp_hit')
+      const hitPrices = (freshTpEvents ?? []).map(ev => ev.price ?? 0)
+      const tpTargets = partialProfits.filter(pp => pp.quantity_percent > 0).map(pp => pp.target_price)
+      isCumulativeClose = tpTargets.length > 0 && tpTargets.every(tp =>
+        hitPrices.some(hp => Math.abs(hp - tp) < tp * 0.001)
+      )
+    }
     const isClose = activeAction.closestrade || isCumulativeClose
 
     if (isClose) {
@@ -258,7 +264,8 @@ export default function ManageTradeScreen() {
       const tpLevels = partialProfits
         .filter(pp => pp.quantity_percent > 0)
         .map(pp => ({ price: pp.target_price, quantity_percent: Math.round(pp.quantity_percent * 100) }))
-      const detected = detectManagementEvents(candles, trade.entry_price, trade.stop_loss, trade.side, tpLevels)
+      const beTrigger = partialProfits.find(pp => pp.quantity_percent === 0)?.target_price
+      const detected = detectManagementEvents(candles, trade.entry_price, trade.stop_loss, trade.side, tpLevels, beTrigger)
       if (detected.length === 0) { Alert.alert('Keine Events', 'SL und TPs wurden in diesem Zeitraum nicht getroffen.'); setDetecting(false); return }
       setDetectedEvents(detected)
       setSelectedDetected(new Set(detected.map((_, i) => i)))
@@ -370,7 +377,7 @@ export default function ManageTradeScreen() {
                   <TouchableOpacity
                     key={pp.id}
                     style={[s.tpBtn, alreadyHit && s.tpBtnHit]}
-                    disabled={loadingTpId === pp.id}
+                    disabled={alreadyHit || loadingTpId === pp.id}
                     onPress={() => {
                       const tpAction = ACTIONS.find(a => a.key === 'tp_hit')!
                       setActiveAction(tpAction)

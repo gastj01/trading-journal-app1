@@ -111,12 +111,15 @@ export function detectManagementEvents(
   stopLoss: number,
   side: 'long' | 'short',
   tpLevels: Array<{ price: number; quantity_percent: number }> = [],
+  beTriggerPrice?: number,
 ): DetectedEvent[] {
   const events: DetectedEvent[] = []
   const pendingTPs = [...tpLevels].sort((a, b) =>
     side === 'long' ? a.price - b.price : b.price - a.price
   )
   let slTriggered = false
+  let beTriggered = false
+  let currentSL = stopLoss
 
   for (const c of candles) {
     if (slTriggered) break
@@ -137,12 +140,27 @@ export function detectManagementEvents(
       }
     }
 
-    const slHit = side === 'long' ? c.low <= stopLoss : c.high >= stopLoss
+    if (!beTriggered && beTriggerPrice != null) {
+      const beHit = side === 'long' ? c.high >= beTriggerPrice : c.low <= beTriggerPrice
+      if (beHit) {
+        events.push({
+          event_type: 'sl_moved_to_be',
+          event_time: time,
+          price: entry,
+          size_percent: null,
+          note: 'Automatisch aus Kerzen erkannt',
+        })
+        beTriggered = true
+        currentSL = entry
+      }
+    }
+
+    const slHit = side === 'long' ? c.low <= currentSL : c.high >= currentSL
     if (slHit) {
       events.push({
-        event_type: 'sl_hit',
+        event_type: beTriggered ? 'sl_hit' : 'sl_hit',
         event_time: time,
-        price: stopLoss,
+        price: currentSL,
         size_percent: null,
         note: 'Automatisch aus Kerzen erkannt',
       })
