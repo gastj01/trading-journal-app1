@@ -15,12 +15,15 @@ export default function EditStrategyScreen() {
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
   const [showAddItem, setShowAddItem] = useState(false)
   const [newItem, setNewItem] = useState({ title: '', category: '', kind: '', description: '' })
+  const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', 'D1']
+
   const [form, setForm] = useState({
     name: '',
     description: '',
     tp1_close_percent: '50',
     default_tp1_r_multiple: '2',
     move_remaining_to_be_after_tp1: false,
+    default_timeframe: '5m',
   })
 
   useEffect(() => {
@@ -41,6 +44,7 @@ export default function EditStrategyScreen() {
         tp1_close_percent: String(strat.tp1_close_percent ?? 50),
         default_tp1_r_multiple: String(strat.default_tp1_r_multiple ?? 2),
         move_remaining_to_be_after_tp1: strat.move_remaining_to_be_after_tp1 ?? false,
+        default_timeframe: strat.default_timeframe ?? '5m',
       })
       setTags(tagDefs ?? [])
       setLinkedTagIds((links ?? []).map((l: any) => l.tag_id))
@@ -83,6 +87,7 @@ export default function EditStrategyScreen() {
       tp1_close_percent: parseFloat(form.tp1_close_percent) || 50,
       default_tp1_r_multiple: parseFloat(form.default_tp1_r_multiple) || 2,
       move_remaining_to_be_after_tp1: form.move_remaining_to_be_after_tp1,
+      default_timeframe: form.default_timeframe,
     }).eq('id', id)
     setSaving(false)
     if (error) Alert.alert('Fehler', error.message)
@@ -176,6 +181,19 @@ export default function EditStrategyScreen() {
             <Text style={s.label}>TP1 R-Multiple</Text>
             <TextInput style={s.input} placeholderTextColor="#555" value={form.default_tp1_r_multiple} onChangeText={v => update('default_tp1_r_multiple', v)} keyboardType="decimal-pad" />
           </View>
+        </View>
+
+        <Text style={s.label}>Standard-Timeframe</Text>
+        <View style={s.chipRow}>
+          {TIMEFRAMES.map(tf => (
+            <TouchableOpacity
+              key={tf}
+              style={[s.chip, form.default_timeframe === tf && s.chipActive]}
+              onPress={() => update('default_timeframe', tf)}
+            >
+              <Text style={[s.chipText, form.default_timeframe === tf && s.chipTextActive]}>{tf}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         <View style={s.switchRow}>
@@ -323,6 +341,11 @@ const s = StyleSheet.create({
   label: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 4, marginTop: 12 },
   input: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, color: '#fff', fontSize: 15, borderWidth: 1, borderColor: '#2a2a2a' },
   row2: { flexDirection: 'row', gap: 8 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a' },
+  chipActive: { backgroundColor: '#22c55e22', borderColor: '#22c55e' },
+  chipText: { color: '#888', fontSize: 13 },
+  chipTextActive: { color: '#22c55e', fontWeight: '600' },
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginTop: 16, borderWidth: 1, borderColor: '#2a2a2a' },
   switchLabel: { flex: 1 },
   switchTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },

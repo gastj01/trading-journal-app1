@@ -2,7 +2,7 @@ import { fetchCandles, normalizeSymbol, type Candle } from './binance'
 
 export type TimeWindow = 'full' | 'morning' | 'afternoon' | 'night'
 export type TouchType = 'all' | 'bounce' | 'breakout'
-export type CandleInterval = '5m' | '15m' | '1h' | '4h'
+export type CandleInterval = '1m' | '5m' | '15m' | '1h' | '4h'
 
 export function getWindowMs(dateStr: string, window: TimeWindow): [number, number] {
   const parts = dateStr.split('.')

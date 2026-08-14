@@ -102,8 +102,12 @@ export default function NewTradeScreen() {
   }
 
   function selectStrategy(stratId: string) {
-    setForm(f => ({ ...f, strategy_id: stratId }))
     const strat = strategies.find(s => s.id === stratId)
+    setForm(f => ({
+      ...f,
+      strategy_id: stratId,
+      ...(strat?.default_timeframe ? { timeframe: strat.default_timeframe } : {}),
+    }))
     setRulesExpanded(!!(strat?.description))
     loadChecklistItems(stratId)
   }

@@ -26,6 +26,7 @@ const TIME_WINDOWS: { key: TimeWindow; label: string }[] = [
 ]
 
 const INTERVALS: { key: CandleInterval; label: string }[] = [
+  { key: '1m', label: '1m' },
   { key: '5m', label: '5m' },
   { key: '15m', label: '15m' },
   { key: '1h', label: '1h' },
