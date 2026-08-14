@@ -42,7 +42,7 @@ export function normalizeInterval(timeframe: string): string | null {
   return INTERVAL_MAP[timeframe] ?? INTERVAL_MAP[timeframe.toUpperCase()] ?? null
 }
 
-export async function fetchCandles(
+async function fetchCandleBatch(
   symbol: string,
   interval: string,
   startMs: number,
@@ -53,7 +53,7 @@ export async function fetchCandles(
     interval,
     startTime: String(startMs),
     endTime: String(endMs),
-    limit: '500',
+    limit: '1000',
   })
   const res = await fetch(`https://api.binance.com/api/v3/klines?${params}`)
   if (!res.ok) {
@@ -69,6 +69,25 @@ export async function fetchCandles(
     close: parseFloat(c[4]),
     closeTime: Number(c[6]),
   }))
+}
+
+export async function fetchCandles(
+  symbol: string,
+  interval: string,
+  startMs: number,
+  endMs: number,
+): Promise<Candle[]> {
+  const all: Candle[] = []
+  let cursor = startMs
+  while (cursor < endMs) {
+    const batch = await fetchCandleBatch(symbol, interval, cursor, endMs)
+    if (batch.length === 0) break
+    all.push(...batch)
+    if (batch.length < 1000) break
+    // next batch starts after last candle's closeTime
+    cursor = batch[batch.length - 1].closeTime + 1
+  }
+  return all
 }
 
 export function calcMFEMAE(
