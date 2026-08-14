@@ -42,11 +42,12 @@ export default function DashboardScreen() {
 
   const totalR = closed.reduce((sum, t) => {
     if (!t.exit_price) return sum
+    const risk = Math.abs(t.entry_price - t.stop_loss)
+    if (risk === 0) return sum
     const diff = t.side === 'long'
       ? t.exit_price - t.entry_price
       : t.entry_price - t.exit_price
-    const risk = t.entry_price - (t.side === 'long' ? t.stop_loss : t.entry_price - (t.entry_price - t.stop_loss))
-    return risk > 0 ? sum + diff / risk : sum
+    return sum + diff / risk
   }, 0)
 
   const recent = trades.slice(0, 5)
