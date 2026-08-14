@@ -609,7 +609,7 @@ const s = StyleSheet.create({
   saveBtn: { backgroundColor: '#22c55e', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
   saveBtnText: { color: '#000', fontWeight: '700', fontSize: 14 },
   scroll: { flex: 1 },
-  content: { padding: 16, paddingBottom: 60, gap: 4 },
+  content: { padding: 16, paddingBottom: 160, gap: 4 },
   label: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 4, marginTop: 12 },
   input: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, color: '#fff', fontSize: 15, borderWidth: 1, borderColor: '#2a2a2a' },
   row2: { flexDirection: 'row', gap: 8 },
