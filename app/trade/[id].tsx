@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
 import { fetchCandles, calcMFEMAE, normalizeSymbol, normalizeInterval } from '../../src/lib/binance'
+import { calcWeightedR } from '../../src/lib/tradeCalc'
 import type { Trade, PartialProfit, ManagementEvent, TagDefinition } from '../../src/types'
 import type { MFEMAEResult } from '../../src/lib/binance'
 
@@ -89,11 +90,9 @@ export default function TradeDetailScreen() {
   if (!trade) return <View style={s.loading}><Text style={s.loadingText}>Laden...</Text></View>
 
   const isLong = trade.side === 'long'
-  const isWin = trade.exit_price != null && (isLong ? trade.exit_price > trade.entry_price : trade.exit_price < trade.entry_price)
-  const risk = Math.abs(trade.entry_price - trade.stop_loss)
-  const rMultiple = trade.exit_price && risk > 0
-    ? ((isLong ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price) / risk).toFixed(2)
-    : null
+  const rRaw = trade.exit_price != null ? calcWeightedR(trade, events) : null
+  const rMultiple = rRaw != null ? rRaw.toFixed(2) : null
+  const isWin = rRaw != null ? rRaw > 0 : false
 
   return (
     <SafeAreaView style={s.safe}>
