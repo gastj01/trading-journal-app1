@@ -381,7 +381,44 @@ Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte a
 
   async function saveAsRuleset() {
     if (!activeStrategy || !visionAnalysis) return
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
     await supabase.from('strategy_profiles').update({ description: visionAnalysis }).eq('id', activeStrategy.id)
+
+    // Parse VORGESCHLAGENE TAGS section
+    const tagsMatch = visionAnalysis.match(/\*\*VORGESCHLAGENE TAGS[:\*]*\*?\*?([\s\S]*?)(?:\*\*[A-Z]|$)/)
+    if (tagsMatch) {
+      const rawLines = tagsMatch[1].split('\n').map(l => l.trim()).filter(Boolean)
+      const tagNames: string[] = []
+      for (const line of rawLines) {
+        // Extract tag-like tokens: word_word or word patterns, skip headers/punctuation
+        const tokens = line.replace(/^[-•*#]+/, '').trim().split(/[\s,;]+/)
+        for (const token of tokens) {
+          if (/^[A-Za-z][A-Za-z0-9_]{1,50}$/.test(token) && token.includes('_')) {
+            tagNames.push(token)
+          }
+        }
+      }
+
+      if (tagNames.length > 0) {
+        const existingNames = new Set(tagDefs.map(t => t.name.toLowerCase()))
+        const toCreate = [...new Set(tagNames)].filter(n => !existingNames.has(n.toLowerCase()))
+
+        if (toCreate.length > 0) {
+          const inferType = (name: string): 'mistake' | 'execution' | 'context' => {
+            const lower = name.toLowerCase()
+            if (lower.includes('fehler') || lower.includes('skip') || lower.includes('regelvers')) return 'mistake'
+            if (lower.includes('a_setup') || lower.includes('b_setup') || lower.includes('tp') || lower.includes('sl_')) return 'execution'
+            return 'context'
+          }
+          await supabase.from('trade_tag_definitions').insert(
+            toCreate.map(name => ({ user_id: user.id, name, tag_type: inferType(name) }))
+          )
+        }
+      }
+    }
+
     setVisionSaved(true)
   }
 
@@ -653,7 +690,7 @@ Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte a
                   <TouchableOpacity onPress={saveAsRuleset} style={s.kiRerun} disabled={visionSaved}>
                     <Feather name="save" size={12} color={visionSaved ? '#22c55e' : '#f59e0b'} />
                     <Text style={[s.kiRerunText, { color: visionSaved ? '#22c55e' : '#f59e0b' }]}>
-                      {visionSaved ? 'Gespeichert ✓' : 'Als Regelwerk speichern'}
+                      {visionSaved ? 'Gespeichert ✓' : 'Regelwerk + Tags speichern'}
                     </Text>
                   </TouchableOpacity>
                 </View>
