@@ -6,7 +6,7 @@ import type { Session } from '@supabase/supabase-js'
 import { useRouter, useSegments } from 'expo-router'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
-import { View, Text, ScrollView, Alert } from 'react-native'
+import { View, Text, ScrollView, Alert, Pressable } from 'react-native'
 
 declare const global: typeof globalThis & { ErrorUtils?: { getGlobalHandler: () => ((error: Error, isFatal?: boolean) => void); setGlobalHandler: (handler: (error: Error, isFatal?: boolean) => void) => void } }
 
@@ -68,6 +68,12 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <Pressable
+        onPress={() => Alert.alert('TEST OK', 'Bare Pressable funktioniert!')}
+        style={{ position: 'absolute', top: 40, right: 10, zIndex: 9999, backgroundColor: '#ef4444', padding: 8, borderRadius: 6 }}
+      >
+        <Text style={{ color: '#fff', fontSize: 10 }}>TEST</Text>
+      </Pressable>
       <SafeAreaProvider>
         <ErrorBoundary>
           <StatusBar style="light" />
