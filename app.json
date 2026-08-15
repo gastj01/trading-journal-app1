@@ -18,7 +18,8 @@
       "package": "com.tradingjournal.app"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "./plugins/withSplitScreenFix"
     ],
     "scheme": "tradingjournal",
     "extra": {
