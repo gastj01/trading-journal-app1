@@ -15,8 +15,7 @@
         "backgroundColor": "#0f0f0f",
         "foregroundImage": "./assets/adaptive-icon.png"
       },
-      "package": "com.tradingjournal.app",
-      "softwareKeyboardLayoutMode": "pan"
+      "package": "com.tradingjournal.app"
     },
     "plugins": [
       "expo-router"

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
@@ -283,6 +283,7 @@ export default function NewTradeScreen() {
         </TouchableOpacity>
       </View>
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <Label text="Konto" />
         <View style={s.optionRow}>
@@ -498,6 +499,7 @@ export default function NewTradeScreen() {
           </>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
 
       <CandleTimePicker
         visible={showCandlePicker}
