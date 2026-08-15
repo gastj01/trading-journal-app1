@@ -20,30 +20,27 @@ function withTouchOffsetFix(config) {
   return withMainActivity(config, (mod) => {
     let src = mod.modResults.contents
 
-    // Add import if not already there
     if (!src.includes('import android.view.MotionEvent')) {
       src = src.replace(
         'import android.os.Build',
-        'import android.os.Build\nimport android.view.MotionEvent'
+        'import android.os.Build\nimport android.view.MotionEvent\nimport android.widget.Toast'
       )
     }
 
-    // Add dispatchTouchEvent override before the last closing brace
+    // Diagnostic: show raw touch coordinates via Toast so we know the actual values
     const override = `
   override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
-    if (ev != null) {
+    if (ev != null && ev.action == MotionEvent.ACTION_DOWN) {
       val loc = IntArray(2)
       window.decorView.getLocationOnScreen(loc)
-      val windowY = loc[1]
-      if (windowY > 0) {
-        ev.offsetLocation(0f, -windowY.toFloat())
-      }
+      Toast.makeText(this,
+        "ev.y=\${ev.y.toInt()} rawY=\${ev.rawY.toInt()} winY=\${loc[1]}",
+        Toast.LENGTH_SHORT).show()
     }
     return super.dispatchTouchEvent(ev)
   }
 `
     if (!src.includes('dispatchTouchEvent')) {
-      // Insert before the final closing brace of the class
       const lastBrace = src.lastIndexOf('}')
       src = src.slice(0, lastBrace) + override + src.slice(lastBrace)
     }
