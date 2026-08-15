@@ -23,19 +23,20 @@ function withTouchOffsetFix(config) {
     if (!src.includes('import android.view.MotionEvent')) {
       src = src.replace(
         'import android.os.Build',
-        'import android.os.Build\nimport android.view.MotionEvent\nimport android.widget.Toast'
+        'import android.os.Build\nimport android.view.MotionEvent'
       )
     }
 
-    // Diagnostic: show raw touch coordinates via Toast so we know the actual values
+    // Add windowY to ev.y so RNGH sees screen-relative coords (matching its getLocationOnScreen view positions)
     const override = `
   override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
-    if (ev != null && ev.action == MotionEvent.ACTION_DOWN) {
+    if (ev != null) {
       val loc = IntArray(2)
       window.decorView.getLocationOnScreen(loc)
-      Toast.makeText(this,
-        "ev.y=\${ev.y.toInt()} rawY=\${ev.rawY.toInt()} winY=\${loc[1]}",
-        Toast.LENGTH_SHORT).show()
+      val windowY = loc[1]
+      if (windowY > 0) {
+        ev.offsetLocation(0f, windowY.toFloat())
+      }
     }
     return super.dispatchTouchEvent(ev)
   }
