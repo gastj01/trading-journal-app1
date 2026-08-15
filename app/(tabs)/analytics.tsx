@@ -1,6 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions } from 'react-native'
-import { Svg, Polyline, Line } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -476,9 +475,8 @@ Direkt und präzise. Kein Intro.`
 
 function EquityCurve({ trades, eventsByTrade }: { trades: Trade[]; eventsByTrade: Map<string, ManagementEvent[]> }) {
   const { width } = useWindowDimensions()
-  const W = width - 32
-  const H = 130
-  const PAD = { top: 8, bottom: 8, left: 32, right: 8 }
+  const W = width - 56
+  const H = 110
 
   const sorted = [...trades].sort((a, b) => new Date(a.opened_at).getTime() - new Date(b.opened_at).getTime())
   if (sorted.length < 2) return null
@@ -492,24 +490,44 @@ function EquityCurve({ trades, eventsByTrade }: { trades: Trade[]; eventsByTrade
   const minY = Math.min(0, ...points)
   const maxY = Math.max(0, ...points)
   const range = maxY - minY || 1
-  const chartW = W - PAD.left - PAD.right
-  const chartH = H - PAD.top - PAD.bottom
-  const toX = (i: number) => PAD.left + (i / (points.length - 1)) * chartW
-  const toY = (v: number) => PAD.top + (1 - (v - minY) / range) * chartH
+  const toX = (i: number) => (i / (points.length - 1)) * W
+  const toY = (v: number) => H - ((v - minY) / range) * H
   const zeroY = toY(0)
-  const polyPoints = points.map((v, i) => `${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(' ')
   const finalR = cumR[cumR.length - 1]
   const lineColor = finalR >= 0 ? '#22c55e' : '#ef4444'
+
+  const segments: { cx: number; cy: number; length: number; angle: number }[] = []
+  for (let i = 0; i < points.length - 1; i++) {
+    const x1 = toX(i), y1 = toY(points[i])
+    const x2 = toX(i + 1), y2 = toY(points[i + 1])
+    const dx = x2 - x1, dy = y2 - y1
+    const len = Math.sqrt(dx * dx + dy * dy)
+    const angle = Math.atan2(dy, dx) * (180 / Math.PI)
+    segments.push({ cx: (x1 + x2) / 2, cy: (y1 + y2) / 2, length: len, angle })
+  }
 
   return (
     <View style={s.section}>
       <Text style={s.sectionTitle}>Equity-Kurve</Text>
-      <View style={{ backgroundColor: '#1a1a1a', borderRadius: 12, padding: 8 }}>
-        <Svg width={W - 16} height={H}>
-          <Line x1={PAD.left} y1={zeroY} x2={W - 16 - PAD.right} y2={zeroY} stroke="#333" strokeWidth={1} strokeDasharray="4,4" />
-          <Polyline points={polyPoints} stroke={lineColor} strokeWidth={2} fill="none" />
-        </Svg>
-        <Text style={{ color: '#555', fontSize: 11, textAlign: 'center', marginTop: 2 }}>
+      <View style={{ backgroundColor: '#1a1a1a', borderRadius: 12, padding: 12 }}>
+        <View style={{ height: H, width: W, position: 'relative', overflow: 'hidden' }}>
+          <View style={{ position: 'absolute', left: 0, right: 0, top: zeroY, height: 1, backgroundColor: '#2a2a2a' }} />
+          {segments.map((seg, i) => (
+            <View
+              key={i}
+              style={{
+                position: 'absolute',
+                left: seg.cx - seg.length / 2,
+                top: seg.cy - 1,
+                width: seg.length,
+                height: 2,
+                backgroundColor: lineColor,
+                transform: [{ rotate: `${seg.angle}deg` }],
+              }}
+            />
+          ))}
+        </View>
+        <Text style={{ color: '#555', fontSize: 11, textAlign: 'center', marginTop: 6 }}>
           {sorted.length} Trades · {finalR > 0 ? '+' : ''}{finalR.toFixed(2)}R gesamt
         </Text>
       </View>
