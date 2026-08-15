@@ -7,7 +7,7 @@ import { useRouter, useSegments } from 'expo-router'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { enableScreens } from 'react-native-screens'
-import { View, Text, ScrollView, Alert } from 'react-native'
+import { View, Text, ScrollView, Alert, useWindowDimensions } from 'react-native'
 
 enableScreens()
 
@@ -46,6 +46,7 @@ export default function RootLayout() {
   const [loading, setLoading] = useState(true)
   const router = useRouter()
   const segments = useSegments()
+  const { width, height } = useWindowDimensions()
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -71,7 +72,7 @@ export default function RootLayout() {
   }, [session, loading, segments])
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView key={`${width}x${height}`} style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ErrorBoundary>
           <StatusBar style="light" />
