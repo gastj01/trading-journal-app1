@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, Component } from 'react'
+import { Dimensions } from 'react-native'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { supabase } from '../src/lib/supabase'
@@ -70,6 +71,11 @@ export default function RootLayout() {
   }, [session, loading, segments])
 
   const [jsTouch, setJsTouch] = useState('JS: tap here')
+  const [dims, setDims] = useState(() => Dimensions.get('window'))
+  useEffect(() => {
+    const sub = Dimensions.addEventListener('change', ({ window }) => setDims(window))
+    return () => sub.remove()
+  }, [])
 
   return (
     <View
@@ -77,7 +83,9 @@ export default function RootLayout() {
       onStartShouldSetResponder={() => true}
       onResponderGrant={e => setJsTouch(`JS locY=${e.nativeEvent.locationY.toFixed(0)} pageY=${e.nativeEvent.pageY.toFixed(0)}`)}
     >
-      <Text style={{ position: 'absolute', top: 5, right: 5, zIndex: 9999, color: '#0f0', backgroundColor: '#000', fontSize: 10, padding: 2 }}>{jsTouch}</Text>
+      <Text style={{ position: 'absolute', top: 5, right: 5, zIndex: 9999, color: '#0f0', backgroundColor: '#000', fontSize: 10, padding: 2 }}>
+        {jsTouch}{'\n'}W:{dims.width}x{dims.height}
+      </Text>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
         <ErrorBoundary>
