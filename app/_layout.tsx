@@ -1,4 +1,4 @@
-import { useEffect, useState, Component } from 'react'
+import { useEffect, useState, useRef, Component } from 'react'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { supabase } from '../src/lib/supabase'
@@ -66,9 +66,17 @@ export default function RootLayout() {
     }
   }, [session, loading, segments])
 
+  const [jsTouch, setJsTouch] = useState('JS: tap here')
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-<SafeAreaProvider>
+    <View
+      style={{ flex: 1 }}
+      onStartShouldSetResponder={() => true}
+      onResponderGrant={e => setJsTouch(`JS locY=${e.nativeEvent.locationY.toFixed(0)} pageY=${e.nativeEvent.pageY.toFixed(0)}`)}
+    >
+      <Text style={{ position: 'absolute', top: 5, right: 5, zIndex: 9999, color: '#0f0', backgroundColor: '#000', fontSize: 10, padding: 2 }}>{jsTouch}</Text>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
         <ErrorBoundary>
           <StatusBar style="light" />
           <Stack screenOptions={{ headerShown: false }}>
@@ -82,7 +90,8 @@ export default function RootLayout() {
             <Stack.Screen name="account/new" options={{ presentation: 'card' }} />
           </Stack>
         </ErrorBoundary>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </View>
   )
 }
