@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions } from 'react-native'
+import { Svg, Polyline, Line } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -364,6 +365,9 @@ Direkt und präzise. Kein Intro.`
           })}
         </View>
 
+        <EquityCurve trades={filtered} eventsByTrade={eventsByTradeId} />
+        <Heatmap trades={filtered} eventsByTrade={eventsByTradeId} />
+
         {tagStats.length > 0 && (
           <View style={s.section}>
             <Text style={s.sectionTitle}>Tag-Analyse</Text>
@@ -467,6 +471,111 @@ Direkt und präzise. Kein Intro.`
         )}
       </ScrollView>
     </SafeAreaView>
+  )
+}
+
+function EquityCurve({ trades, eventsByTrade }: { trades: Trade[]; eventsByTrade: Map<string, ManagementEvent[]> }) {
+  const { width } = useWindowDimensions()
+  const W = width - 32
+  const H = 130
+  const PAD = { top: 8, bottom: 8, left: 32, right: 8 }
+
+  const sorted = [...trades].sort((a, b) => new Date(a.opened_at).getTime() - new Date(b.opened_at).getTime())
+  if (sorted.length < 2) return null
+
+  const rVals = sorted.map(t => calcWeightedR(t, eventsByTrade.get(t.id) ?? []) ?? 0)
+  const cumR: number[] = []
+  let running = 0
+  for (const r of rVals) { running += r; cumR.push(running) }
+
+  const points = [0, ...cumR]
+  const minY = Math.min(0, ...points)
+  const maxY = Math.max(0, ...points)
+  const range = maxY - minY || 1
+  const chartW = W - PAD.left - PAD.right
+  const chartH = H - PAD.top - PAD.bottom
+  const toX = (i: number) => PAD.left + (i / (points.length - 1)) * chartW
+  const toY = (v: number) => PAD.top + (1 - (v - minY) / range) * chartH
+  const zeroY = toY(0)
+  const polyPoints = points.map((v, i) => `${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(' ')
+  const finalR = cumR[cumR.length - 1]
+  const lineColor = finalR >= 0 ? '#22c55e' : '#ef4444'
+
+  return (
+    <View style={s.section}>
+      <Text style={s.sectionTitle}>Equity-Kurve</Text>
+      <View style={{ backgroundColor: '#1a1a1a', borderRadius: 12, padding: 8 }}>
+        <Svg width={W - 16} height={H}>
+          <Line x1={PAD.left} y1={zeroY} x2={W - 16 - PAD.right} y2={zeroY} stroke="#333" strokeWidth={1} strokeDasharray="4,4" />
+          <Polyline points={polyPoints} stroke={lineColor} strokeWidth={2} fill="none" />
+        </Svg>
+        <Text style={{ color: '#555', fontSize: 11, textAlign: 'center', marginTop: 2 }}>
+          {sorted.length} Trades · {finalR > 0 ? '+' : ''}{finalR.toFixed(2)}R gesamt
+        </Text>
+      </View>
+    </View>
+  )
+}
+
+function Heatmap({ trades, eventsByTrade }: { trades: Trade[]; eventsByTrade: Map<string, ManagementEvent[]> }) {
+  if (trades.length === 0) return null
+  const dayNames = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+  const timeSlots = ['0-4', '4-8', '8-12', '12-16', '16-20', '20-24']
+  const cells: { rVals: number[] }[][] = Array.from({ length: 7 }, () =>
+    Array.from({ length: 6 }, () => ({ rVals: [] }))
+  )
+  for (const t of trades) {
+    const d = new Date(t.opened_at)
+    const localDay = d.getDay()
+    const dayIdx = localDay === 0 ? 6 : localDay - 1
+    const slotIdx = Math.min(Math.floor(d.getHours() / 4), 5)
+    const r = calcWeightedR(t, eventsByTrade.get(t.id) ?? []) ?? 0
+    cells[dayIdx][slotIdx].rVals.push(r)
+  }
+  const cellBg = (rVals: number[]) => {
+    if (rVals.length === 0) return '#111'
+    const avg = rVals.reduce((a, b) => a + b, 0) / rVals.length
+    if (avg >= 1.5) return '#052e16'
+    if (avg >= 0.5) return '#0a4a1a'
+    if (avg > 0) return '#0d2d10'
+    if (avg > -1.5) return '#2d0a0a'
+    return '#4a0505'
+  }
+  const cellFg = (rVals: number[]) => {
+    if (rVals.length === 0) return '#333'
+    return (rVals.reduce((a, b) => a + b, 0) / rVals.length) >= 0 ? '#22c55e' : '#ef4444'
+  }
+  return (
+    <View style={s.section}>
+      <Text style={s.sectionTitle}>Heatmap (Ortszeit)</Text>
+      <View style={{ backgroundColor: '#1a1a1a', borderRadius: 12, padding: 10 }}>
+        <View style={{ flexDirection: 'row', marginBottom: 4, marginLeft: 26 }}>
+          {timeSlots.map(slot => (
+            <Text key={slot} style={{ flex: 1, color: '#555', fontSize: 9, textAlign: 'center' }}>{slot}</Text>
+          ))}
+        </View>
+        {dayNames.map((day, di) => (
+          <View key={day} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 3 }}>
+            <Text style={{ color: '#666', fontSize: 11, width: 26 }}>{day}</Text>
+            {cells[di].map((cell, si) => {
+              const avg = cell.rVals.length > 0 ? cell.rVals.reduce((a, b) => a + b, 0) / cell.rVals.length : null
+              return (
+                <View key={si} style={{ flex: 1, height: 34, backgroundColor: cellBg(cell.rVals), borderRadius: 4, marginHorizontal: 1, alignItems: 'center', justifyContent: 'center' }}>
+                  {avg !== null && (
+                    <>
+                      <Text style={{ color: cellFg(cell.rVals), fontSize: 9, fontWeight: '700' }}>
+                        {avg > 0 ? '+' : ''}{avg.toFixed(1)}
+                      </Text>
+                      <Text style={{ color: '#555', fontSize: 8 }}>{cell.rVals.length}×</Text>
+                    </>
+                  )}
+                </View>
+              )
+            })}
+          </View>
+        ))}
+      </View>
+    </View>
   )
 }
 
