@@ -1,4 +1,4 @@
-import { useEffect, useState, Component } from 'react'
+import { useEffect, useState, useRef, Component } from 'react'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { supabase } from '../src/lib/supabase'
@@ -7,7 +7,7 @@ import { useRouter, useSegments } from 'expo-router'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { enableScreens } from 'react-native-screens'
-import { View, Text, ScrollView, Alert, useWindowDimensions } from 'react-native'
+import { View, Text, ScrollView, Alert, useWindowDimensions, AppState } from 'react-native'
 
 enableScreens()
 
@@ -47,6 +47,23 @@ export default function RootLayout() {
   const router = useRouter()
   const segments = useSegments()
   const { width, height } = useWindowDimensions()
+  const rootRef = useRef<View>(null)
+  const [screenY, setScreenY] = useState(0)
+
+  function measurePosition() {
+    rootRef.current?.measureInWindow((_x, y) => {
+      // Round to 20px steps to avoid micro-jitter triggering remounts
+      const rounded = Math.round(y / 20) * 20
+      setScreenY(prev => prev !== rounded ? rounded : prev)
+    })
+  }
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') measurePosition()
+    })
+    return () => sub.remove()
+  }, [])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -72,7 +89,8 @@ export default function RootLayout() {
   }, [session, loading, segments])
 
   return (
-    <GestureHandlerRootView key={`${width}x${height}`} style={{ flex: 1 }}>
+    <View ref={rootRef} style={{ flex: 1 }} onLayout={measurePosition}>
+    <GestureHandlerRootView key={`${width}x${height}x${screenY}`} style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ErrorBoundary>
           <StatusBar style="light" />
@@ -89,5 +107,6 @@ export default function RootLayout() {
         </ErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+    </View>
   )
 }
