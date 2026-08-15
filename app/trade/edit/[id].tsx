@@ -8,7 +8,8 @@ import * as FileSystem from 'expo-file-system/legacy'
 import { supabase } from '../../../src/lib/supabase'
 import { isoToDateStr, isoToTimeStr, parseDateTimeToISO } from '../../../src/lib/datetime'
 import { DateTimeInputs } from '../../../src/components/DateTimeInputs'
-import { fetchCandles, normalizeSymbol, normalizeInterval } from '../../../src/lib/binance'
+import { CandleTimePicker } from '../../../src/components/CandleTimePicker'
+import { normalizeSymbol } from '../../../src/lib/binance'
 import type { Trade, TagDefinition, StrategyProfile, ChecklistItem } from '../../../src/types'
 
 export default function EditTradeScreen() {
@@ -25,7 +26,7 @@ export default function EditTradeScreen() {
   const [rulesExpanded, setRulesExpanded] = useState(false)
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
-  const [detectingEntry, setDetectingEntry] = useState(false)
+  const [showEntryPicker, setShowEntryPicker] = useState(false)
   const [tpLevels, setTpLevels] = useState<{ price: string; qty: string }[]>([])
   const [form, setForm] = useState({
     symbol: '',
@@ -173,33 +174,6 @@ export default function EditTradeScreen() {
     setSelectedTagIds(prev =>
       prev.includes(tagId) ? prev.filter(t => t !== tagId) : [...prev, tagId]
     )
-  }
-
-  async function handleDetectEntry() {
-    const entryPrice = parseFloat(form.entry_price)
-    const symbol = normalizeSymbol(form.symbol || trade?.symbol || '')
-    const interval = normalizeInterval(form.timeframe || trade?.timeframe || '5m') ?? '5m'
-    if (!entryPrice || !symbol) { Alert.alert('Fehler', 'Symbol und Einstiegspreis müssen gesetzt sein.'); return }
-    setDetectingEntry(true)
-    try {
-      const dateStr = form.opened_at_date
-      const parts = dateStr.split('.')
-      if (parts.length !== 3) { Alert.alert('Fehler', 'Bitte zuerst ein Datum eingeben.'); setDetectingEntry(false); return }
-      const [day, month, year] = parts
-      const startMs = new Date(`${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}T00:00:00`).getTime()
-      const endMs = startMs + 24 * 60 * 60 * 1000
-      const candles = await fetchCandles(symbol, interval, startMs, endMs)
-      const side = form.side || trade?.side || 'long'
-      const hit = candles.find(c => side === 'long' ? c.low <= entryPrice && c.high >= entryPrice : c.low <= entryPrice && c.high >= entryPrice)
-      if (!hit) { Alert.alert('Nicht gefunden', `Kurs hat ${entryPrice} am ${dateStr} nicht berührt.`); setDetectingEntry(false); return }
-      const d = new Date(hit.openTime)
-      const pad = (n: number) => String(n).padStart(2, '0')
-      update('opened_at_time', `${pad(d.getHours())}:${pad(d.getMinutes())}`)
-      Alert.alert('Gefunden', `Einstiegskerze: ${pad(d.getHours())}:${pad(d.getMinutes())} Uhr`)
-    } catch (e: any) {
-      Alert.alert('Fehler', e?.message ?? 'Binance-Abruf fehlgeschlagen.')
-    }
-    setDetectingEntry(false)
   }
 
   async function handlePickScreenshot() {
@@ -567,9 +541,9 @@ export default function EditTradeScreen() {
 
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <Text style={s.label}>Handelszeitpunkt</Text>
-          <TouchableOpacity onPress={handleDetectEntry} disabled={detectingEntry} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            {detectingEntry ? <ActivityIndicator size="small" color="#f59e0b" /> : <Feather name="search" size={14} color="#f59e0b" />}
-            <Text style={{ color: '#f59e0b', fontSize: 12 }}>Kerze erkennen</Text>
+          <TouchableOpacity onPress={() => setShowEntryPicker(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Feather name="search" size={14} color="#f59e0b" />
+            <Text style={{ color: '#f59e0b', fontSize: 12 }}>Kerze wählen</Text>
           </TouchableOpacity>
         </View>
         <DateTimeInputs
@@ -632,6 +606,20 @@ export default function EditTradeScreen() {
         )}
       </ScrollView>
       </KeyboardAvoidingView>
+      <CandleTimePicker
+        visible={showEntryPicker}
+        symbol={normalizeSymbol(form.symbol || trade?.symbol || '')}
+        price={parseFloat(form.entry_price) || 0}
+        side={form.side || trade?.side || 'long'}
+        initialDate={form.opened_at_date}
+        onSelect={c => {
+          const d = new Date(c.openTime)
+          const pad = (n: number) => String(n).padStart(2, '0')
+          update('opened_at_date', `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`)
+          update('opened_at_time', `${pad(d.getHours())}:${pad(d.getMinutes())}`)
+        }}
+        onClose={() => setShowEntryPicker(false)}
+      />
     </SafeAreaView>
   )
 }
