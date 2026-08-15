@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../src/lib/supabase'
 import { ANTHROPIC_KEY } from './settings'
 import { calcWeightedR } from '../../src/lib/tradeCalc'
+import { fetchCandles, normalizeSymbol, normalizeInterval } from '../../src/lib/binance'
 import type { Trade, TagDefinition, StrategyProfile, ManagementEvent } from '../../src/types'
 
 type Period = '7d' | '30d' | '90d' | 'all'
@@ -254,36 +255,88 @@ Direkt und präzise. Kein Intro.`
     }
 
     const sample = stratTrades.slice(0, 10)
-    const imageUrls: string[] = []
-    for (const trade of sample) {
-      const { data } = await supabase.storage.from('trade-screenshots').createSignedUrl(trade.screenshot_path!, 3600)
-      if (data?.signedUrl) imageUrls.push(data.signedUrl)
+
+    // Fetch signed URLs + candles per trade in parallel per trade
+    type TradeData = {
+      trade: typeof sample[0]
+      imageUrl: string | null
+      candleText: string | null
+      r: number
     }
 
-    if (imageUrls.length === 0) {
+    const tradeDataList: TradeData[] = await Promise.all(sample.map(async t => {
+      const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
+
+      // Screenshot URL
+      const { data: urlData } = await supabase.storage.from('trade-screenshots').createSignedUrl(t.screenshot_path!, 3600)
+      const imageUrl = urlData?.signedUrl ?? null
+
+      // Candles: 30 before entry, full trade, 30 after exit
+      let candleText: string | null = null
+      const interval = t.timeframe ? normalizeInterval(t.timeframe) : null
+      if (interval && t.opened_at && t.closed_at) {
+        try {
+          const symbol = normalizeSymbol(t.symbol)
+          const entryMs = new Date(t.opened_at).getTime()
+          const exitMs = new Date(t.closed_at).getTime()
+
+          // Calculate 30-candle offset in ms
+          const intervalMs: Record<string, number> = {
+            '1m': 60000, '3m': 180000, '5m': 300000, '15m': 900000, '30m': 1800000,
+            '1h': 3600000, '2h': 7200000, '4h': 14400000, '6h': 21600000,
+            '8h': 28800000, '12h': 43200000, '1d': 86400000,
+          }
+          const candleMs = intervalMs[interval] ?? 900000
+          const startMs = entryMs - 30 * candleMs
+          const endMs = exitMs + 30 * candleMs
+
+          const candles = await fetchCandles(symbol, interval, startMs, endMs)
+          if (candles.length > 0) {
+            const entryIdx = candles.findIndex(c => c.openTime >= entryMs)
+            const exitIdx = candles.findIndex(c => c.openTime >= exitMs)
+            const rows = candles.map((c, i) => {
+              const isEntry = i === entryIdx ? ' ← ENTRY' : ''
+              const isExit = i === exitIdx ? ' ← EXIT' : ''
+              const dt = new Date(c.openTime)
+              const ts = `${dt.getUTCMonth() + 1}/${dt.getUTCDate()} ${String(dt.getUTCHours()).padStart(2, '0')}:${String(dt.getUTCMinutes()).padStart(2, '0')}`
+              return `${ts} O:${c.open} H:${c.high} L:${c.low} C:${c.close}${isEntry}${isExit}`
+            })
+            candleText = rows.join('\n')
+          }
+        } catch { /* Binance error: skip candles for this trade */ }
+      }
+
+      return { trade: t, imageUrl, candleText, r }
+    }))
+
+    const withImages = tradeDataList.filter(d => d.imageUrl)
+    if (withImages.length === 0) {
       setVisionError('Screenshots konnten nicht geladen werden.')
       setVisionLoading(false)
       return
     }
 
-    const tradeSummary = sample.map((t, i) => {
-      const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
-      return `Trade ${i + 1}: ${t.symbol} ${t.side.toUpperCase()} | Entry: ${t.entry_price} | SL: ${t.stop_loss} | Result: ${r > 0 ? '+' : ''}${r.toFixed(2)}R | Timeframe: ${t.timeframe || '—'} | Notes: ${t.notes || '—'} | Setup: ${t.setup || '—'}`
-    }).join('\n')
+    const tradeBlocks = tradeDataList.map((d, i) => {
+      const t = d.trade
+      const header = `Trade ${i + 1}: ${t.symbol} ${t.side.toUpperCase()} | Entry: ${t.entry_price} | SL: ${t.stop_loss} | Result: ${d.r > 0 ? '+' : ''}${d.r.toFixed(2)}R | TF: ${t.timeframe || '—'} | Notes: ${t.notes || '—'} | Setup: ${t.setup || '—'}`
+      const candles = d.candleText ? `\nKERZEN (UTC):\n${d.candleText}` : '\n(Keine Kerzendaten — nur Screenshot und Notizen)'
+      return header + candles
+    }).join('\n\n---\n\n')
 
     const prompt = `Du bist ein erfahrener Trading-Coach und Chart-Analyst.
-Analysiere diese ${imageUrls.length} Trade-Screenshots der Strategie "${activeStrategy.name}".
+Analysiere diese ${withImages.length} Trade-Screenshots der Strategie "${activeStrategy.name}".
 ${activeStrategy.description ? `\nBestehendes Regelwerk:\n${activeStrategy.description}\n` : ''}
-TRADE-DATEN:
-${tradeSummary}
+Zu jedem Screenshot folgen OHLC-Kerzendaten (UTC): 30 Kerzen vor Entry, gesamter Trade, 30 Kerzen nach Exit. ENTRY und EXIT sind markiert.
 
-Identifiziere gemeinsame visuelle Muster und erstelle ein präzises Regelwerk. Antworte auf Deutsch:
+${tradeBlocks}
+
+Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte auf Deutsch:
 
 **SETUP-KRITERIEN:**
 [Was muss auf dem Chart erkennbar sein?]
 
 **ENTRY-TRIGGER:**
-[Was löst den Einstieg konkret aus?]
+[Was löst den Einstieg konkret aus? Kerzenmuster, Level, Zeitpunkt]
 
 **STOP LOSS:**
 [Wo und wie wird der SL platziert?]
@@ -295,10 +348,10 @@ Identifiziere gemeinsame visuelle Muster und erstelle ein präzises Regelwerk. A
 [Was schließt ein Setup aus? Session, Wochentag, Marktbedingungen]
 
 **VORGESCHLAGENE TAGS:**
-[Konkrete Tag-Namen zum Erfassen, z.B. FVG_vorhanden, NYC_Open, Trend_klar]
+[Konkrete Tag-Namen, z.B. FVG_vorhanden, NYC_Open, Trend_klar]
 
 **VISUELLE MUSTER:**
-[Gemeinsame Chartstrukturen, Formationen, Levels die du auf den Screenshots erkennst]`
+[Gemeinsame Chartstrukturen auf den Screenshots — was siehst du wiederholt?]`
 
     try {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -310,7 +363,7 @@ Identifiziere gemeinsame visuelle Muster und erstelle ein präzises Regelwerk. A
           messages: [{
             role: 'user',
             content: [
-              ...imageUrls.map(url => ({ type: 'image' as const, source: { type: 'url' as const, url } })),
+              ...withImages.map(d => ({ type: 'image' as const, source: { type: 'url' as const, url: d.imageUrl! } })),
               { type: 'text' as const, text: prompt },
             ],
           }],
