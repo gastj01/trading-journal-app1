@@ -294,13 +294,32 @@ Direkt und präzise. Kein Intro.`
           if (candles.length > 0) {
             const entryIdx = candles.findIndex(c => c.openTime >= entryMs)
             const exitIdx = candles.findIndex(c => c.openTime >= exitMs)
-            const rows = candles.map((c, i) => {
-              const isEntry = i === entryIdx ? ' ← ENTRY' : ''
-              const isExit = i === exitIdx ? ' ← EXIT' : ''
+
+            // Cap at 150 candles total: keep 30 before entry, up to 90 trade body, 30 after exit
+            // If trade body > 90 candles, subsample evenly
+            const pre = candles.slice(0, Math.max(entryIdx, 0)).slice(-30)
+            const body = exitIdx > entryIdx ? candles.slice(entryIdx, exitIdx + 1) : candles.slice(entryIdx, entryIdx + 1)
+            const post = candles.slice(Math.min(exitIdx + 1, candles.length)).slice(0, 30)
+
+            let sampledBody = body
+            if (body.length > 90) {
+              const step = body.length / 90
+              sampledBody = Array.from({ length: 90 }, (_, i) => body[Math.round(i * step)])
+                .filter(Boolean)
+            }
+
+            const display = [...pre, ...sampledBody, ...post]
+            const entryIdxD = pre.length
+            const exitIdxD = pre.length + sampledBody.length - 1
+
+            const rows = display.map((c, i) => {
+              const isEntry = i === entryIdxD ? ' ← ENTRY' : ''
+              const isExit = i === exitIdxD ? ' ← EXIT' : ''
               const dt = new Date(c.openTime)
               const ts = `${dt.getUTCMonth() + 1}/${dt.getUTCDate()} ${String(dt.getUTCHours()).padStart(2, '0')}:${String(dt.getUTCMinutes()).padStart(2, '0')}`
               return `${ts} O:${c.open} H:${c.high} L:${c.low} C:${c.close}${isEntry}${isExit}`
             })
+            if (body.length > 90) rows.splice(entryIdxD + 1, 0, `... (${body.length - 90} Kerzen ausgedünnt)`)
             candleText = rows.join('\n')
           }
         } catch { /* Binance error: skip candles for this trade */ }
