@@ -3,11 +3,13 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Image, Act
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../src/lib/supabase'
 import { fetchCandles, calcMFEMAE, normalizeSymbol, normalizeInterval } from '../../src/lib/binance'
 import { calcWeightedR } from '../../src/lib/tradeCalc'
 import type { Trade, PartialProfit, ManagementEvent, TagDefinition } from '../../src/types'
 import type { MFEMAEResult } from '../../src/lib/binance'
+import { ANTHROPIC_KEY } from '../(tabs)/settings'
 
 interface ChecklistResponseWithItem {
   id: string
@@ -30,6 +32,10 @@ export default function TradeDetailScreen() {
   const [ohlcv, setOhlcv] = useState<MFEMAEResult | null>(null)
   const [ohlcvLoading, setOhlcvLoading] = useState(false)
   const [ohlcvError, setOhlcvError] = useState<string | null>(null)
+  const [allTagDefs, setAllTagDefs] = useState<TagDefinition[]>([])
+  const [kiLoading, setKiLoading] = useState(false)
+  const [kiError, setKiError] = useState<string | null>(null)
+  const [kiSaved, setKiSaved] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -45,6 +51,11 @@ export default function TradeDetailScreen() {
       setEvents(ev ?? [])
       setTags((tagAssign ?? []).map((a: any) => a.tag).filter(Boolean))
       setChecklistResponses(clResponses ?? [])
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: tdefs } = await supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id)
+        setAllTagDefs(tdefs ?? [])
+      }
 
       if (t) loadOhlcv(t)
     }
@@ -74,6 +85,112 @@ export default function TradeDetailScreen() {
 
     if (id) load()
   }, [id])
+
+  async function runKiReview() {
+    if (!trade) return
+    const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
+    if (!key) { setKiError('Kein API Key in Einstellungen gesetzt.'); return }
+
+    setKiLoading(true)
+    setKiError(null)
+    setKiSaved(false)
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setKiLoading(false); return }
+
+    const r = trade.exit_price != null ? calcWeightedR(trade, events) : null
+    const tagList = allTagDefs.map(t => `${t.tag_type}: ${t.name}`).join(', ') || 'Keine Tags vorhanden'
+
+    // Format candles from already-loaded ohlcv, or fetch fresh with buffer
+    let candleText = ''
+    if (ohlcv && ohlcv.candles.length > 0) {
+      const entryMs = new Date(trade.opened_at).getTime()
+      const exitMs = trade.closed_at ? new Date(trade.closed_at).getTime() : 0
+      const rows = ohlcv.candles.map(c => {
+        const dt = new Date(c.openTime)
+        const ts = `${dt.getUTCMonth() + 1}/${dt.getUTCDate()} ${String(dt.getUTCHours()).padStart(2, '0')}:${String(dt.getUTCMinutes()).padStart(2, '0')}`
+        const mark = c.openTime >= entryMs && c.openTime < entryMs + 1000 ? ' ← ENTRY'
+          : exitMs && c.openTime >= exitMs && c.openTime < exitMs + 1000 ? ' ← EXIT' : ''
+        return `${ts} O:${c.open} H:${c.high} L:${c.low} C:${c.close}${mark}`
+      })
+      candleText = `\nKERZEN (UTC):\n${rows.join('\n')}`
+    }
+
+    // Screenshot URL
+    let imageContent: any[] = []
+    if (trade.screenshot_path) {
+      try {
+        const { data: compressed } = await supabase.storage.from('trade-screenshots')
+          .createSignedUrl(trade.screenshot_path, 3600, { transform: { width: 800, quality: 70 } })
+        const url = compressed?.signedUrl
+        if (url) imageContent = [{ type: 'image', source: { type: 'url', url } }]
+      } catch {
+        const { data: orig } = await supabase.storage.from('trade-screenshots').createSignedUrl(trade.screenshot_path, 3600)
+        if (orig?.signedUrl) imageContent = [{ type: 'image', source: { type: 'url', url: orig.signedUrl } }]
+      }
+    }
+
+    const prompt = `Analysiere diesen Trade. Antworte NUR als JSON (kein Markdown, kein Text davor/danach).
+
+TRADE: ${trade.symbol} ${trade.side.toUpperCase()} | Entry:${trade.entry_price} SL:${trade.stop_loss} Exit:${trade.exit_price ?? '—'} Result:${r != null ? (r > 0 ? '+' : '') + r.toFixed(2) + 'R' : 'offen'} | TF:${trade.timeframe || '—'}
+Notizen: ${trade.notes || '—'} | Setup: ${trade.setup || '—'}${candleText}
+
+VORHANDENE TAGS: ${tagList}
+
+{"existing_tags":["tag_name"],"new_tags":[{"name":"neuer_tag","type":"context|execution|mistake"}],"ki_note":"2-4 Sätze: Setup erkannt, Ausführung, was lief gut/schlecht."}`
+
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 800,
+          messages: [{ role: 'user', content: [...imageContent, { type: 'text', text: prompt }] }],
+        }),
+      })
+      if (!res.ok) throw new Error(`API ${res.status}`)
+      const data = await res.json()
+      const text = data.content?.[0]?.text ?? ''
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null
+      if (!parsed) throw new Error('Ungültige JSON-Antwort')
+
+      // Save ki_note
+      await supabase.from('trades').update({ ki_notes: parsed.ki_note }).eq('id', trade.id)
+      setTrade({ ...trade, ki_notes: parsed.ki_note })
+
+      // Create new tags
+      if (parsed.new_tags?.length) {
+        const existing = new Set(allTagDefs.map((t: TagDefinition) => t.name.toLowerCase()))
+        const toCreate = parsed.new_tags.filter((nt: any) => !existing.has(nt.name.toLowerCase()))
+        if (toCreate.length) {
+          const { data: created } = await supabase.from('trade_tag_definitions')
+            .insert(toCreate.map((nt: any) => ({ user_id: user.id, name: nt.name, tag_type: nt.type ?? 'context' })))
+            .select()
+          if (created) setAllTagDefs(prev => [...prev, ...created])
+        }
+      }
+
+      // Assign existing + new tags
+      const allNames = new Set([...(parsed.existing_tags ?? []), ...(parsed.new_tags?.map((t: any) => t.name) ?? [])])
+      const updatedDefs = [...allTagDefs, ...((parsed.new_tags ?? []).map((nt: any) => ({ name: nt.name })))]
+      const toAssign = updatedDefs.filter((td: any) => allNames.has(td.name) && td.id)
+      if (toAssign.length) {
+        await supabase.from('trade_tag_assignments').delete().eq('trade_id', trade.id)
+        await supabase.from('trade_tag_assignments').insert(
+          toAssign.map((td: any) => ({ trade_id: trade.id, tag_id: td.id, user_id: user.id }))
+        )
+        setTags(toAssign as TagDefinition[])
+      }
+
+      setKiSaved(true)
+    } catch (e: any) {
+      setKiError(e?.message ?? 'Fehler')
+    } finally {
+      setKiLoading(false)
+    }
+  }
 
   async function handleDelete() {
     Alert.alert('Trade löschen', 'Wirklich löschen?', [
@@ -244,6 +361,28 @@ export default function TradeDetailScreen() {
             {trade.notes ? <Text style={s.noteText}>{trade.notes}</Text> : null}
           </View>
         )}
+
+        {trade.ki_notes && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>KI Review</Text>
+            <Text style={s.noteText}>{trade.ki_notes}</Text>
+          </View>
+        )}
+
+        <View style={s.section}>
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1a1a2d', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#818cf833' }}
+            onPress={runKiReview}
+            disabled={kiLoading}
+          >
+            {kiLoading ? <ActivityIndicator size="small" color="#818cf8" /> : <Feather name="cpu" size={15} color="#818cf8" />}
+            <Text style={{ color: '#818cf8', fontSize: 13, fontWeight: '600', flex: 1 }}>
+              {kiLoading ? 'KI analysiert...' : kiSaved ? 'KI Review aktualisieren' : 'KI Review & Auto-Tag'}
+            </Text>
+            {kiSaved && <Feather name="check" size={14} color="#22c55e" />}
+          </TouchableOpacity>
+          {kiError ? <Text style={{ color: '#ef4444', fontSize: 12, marginTop: 6 }}>{kiError}</Text> : null}
+        </View>
 
         <View style={s.section}>
           <Text style={s.sectionTitle}>OHLCV Analyse</Text>

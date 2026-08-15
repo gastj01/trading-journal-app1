@@ -76,6 +76,10 @@ export default function AnalyticsScreen() {
   const [textLoading, setTextLoading] = useState(false)
   const [textError, setTextError] = useState<string | null>(null)
   const [textSaved, setTextSaved] = useState(false)
+  const [autoTagLoading, setAutoTagLoading] = useState(false)
+  const [autoTagProgress, setAutoTagProgress] = useState('')
+  const [autoTagError, setAutoTagError] = useState<string | null>(null)
+  const [autoTagDone, setAutoTagDone] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -283,6 +287,100 @@ Direkt und präzise. Kein Intro.`
     } finally {
       setKiLoading(false)
     }
+  }
+
+  async function runAutoTag() {
+    if (!activeStrategy) return
+    const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
+    if (!key) { setAutoTagError('Kein API Key gesetzt.'); return }
+
+    setAutoTagLoading(true)
+    setAutoTagError(null)
+    setAutoTagDone(false)
+    setAutoTagProgress('')
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setAutoTagLoading(false); return }
+
+    const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id)
+    if (stratTrades.length === 0) { setAutoTagError('Keine Trades.'); setAutoTagLoading(false); return }
+
+    const tagList = tagDefs.map(t => `${t.tag_type}: ${t.name}`).join(', ') || 'Keine Tags vorhanden'
+    const BATCH = 5
+    let currentTagDefs = [...tagDefs]
+
+    for (let i = 0; i < stratTrades.length; i += BATCH) {
+      const batch = stratTrades.slice(i, i + BATCH)
+      setAutoTagProgress(`${Math.min(i + BATCH, stratTrades.length)}/${stratTrades.length} Trades...`)
+
+      const tradeBlocks = await Promise.all(batch.map(async (t, bi) => {
+        const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
+        const header = `Trade ${bi + 1} (ID:${t.id}): ${t.symbol} ${t.side.toUpperCase()} | Entry:${t.entry_price} SL:${t.stop_loss} Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'} | Notes:${t.notes || '—'}`
+        const candleText = await buildCandleText(t)
+        return header + (candleText ? `\nKERZEN:\n${candleText}` : '')
+      }))
+
+      const prompt = `Analysiere diese ${batch.length} Trades. Antworte NUR als JSON Array (kein Markdown).
+
+VORHANDENE TAGS: ${tagList}
+
+${tradeBlocks.join('\n\n---\n\n')}
+
+[{"trade_id":"...","existing_tags":["tag"],"new_tags":[{"name":"tag","type":"context"}],"ki_note":"2-3 Sätze."}]`
+
+      try {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-6', max_tokens: 1500,
+            messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+          }),
+        })
+        if (!res.ok) throw new Error(`API ${res.status}`)
+        const data = await res.json()
+        const text = data.content?.[0]?.text ?? ''
+        const jsonMatch = text.match(/\[[\s\S]*\]/)
+        const results: any[] = jsonMatch ? JSON.parse(jsonMatch[0]) : []
+
+        for (const result of results) {
+          // Create new tags
+          if (result.new_tags?.length) {
+            const existing = new Set(currentTagDefs.map((t: TagDefinition) => t.name.toLowerCase()))
+            const toCreate = result.new_tags.filter((nt: any) => !existing.has(nt.name.toLowerCase()))
+            if (toCreate.length) {
+              const { data: created } = await supabase.from('trade_tag_definitions')
+                .insert(toCreate.map((nt: any) => ({ user_id: user.id, name: nt.name, tag_type: nt.type ?? 'context' })))
+                .select()
+              if (created) currentTagDefs = [...currentTagDefs, ...created]
+            }
+          }
+
+          // Assign tags
+          const allNames = new Set([...(result.existing_tags ?? []), ...(result.new_tags?.map((t: any) => t.name) ?? [])])
+          const toAssign = currentTagDefs.filter((td: TagDefinition) => allNames.has(td.name))
+          if (toAssign.length) {
+            await supabase.from('trade_tag_assignments').delete().eq('trade_id', result.trade_id)
+            await supabase.from('trade_tag_assignments').insert(
+              toAssign.map((td: TagDefinition) => ({ trade_id: result.trade_id, tag_id: td.id, user_id: user.id }))
+            )
+          }
+
+          // Save ki_notes
+          if (result.ki_note) {
+            await supabase.from('trades').update({ ki_notes: result.ki_note }).eq('id', result.trade_id)
+          }
+        }
+      } catch (e: any) {
+        setAutoTagError(`Batch ${i / BATCH + 1}: ${e?.message}`)
+        setAutoTagLoading(false)
+        return
+      }
+    }
+
+    setAutoTagDone(true)
+    setAutoTagLoading(false)
+    setAutoTagProgress('')
   }
 
   async function runTextKI() {
@@ -753,6 +851,15 @@ Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte a
                 </TouchableOpacity>
               </View>
             )}
+
+            {/* Auto-Tag & KI Review: alle Trades automatisch taggen */}
+            <TouchableOpacity style={[s.kiBtn, { borderColor: '#a78bfa33', marginTop: 10 }]} onPress={runAutoTag} disabled={autoTagLoading}>
+              {autoTagLoading ? <ActivityIndicator size="small" color="#a78bfa" /> : <Feather name="tag" size={16} color="#a78bfa" />}
+              <Text style={[s.kiBtnText, { color: '#a78bfa' }]}>
+                {autoTagLoading ? `Auto-Tag läuft... ${autoTagProgress}` : autoTagDone ? `Auto-Tag fertig ✓ (${trades.filter(t => t.strategy_id === activeStrategy!.id).length} Trades)` : `Auto-Tag & KI Review (${trades.filter(t => t.strategy_id === activeStrategy!.id).length} Trades)`}
+              </Text>
+            </TouchableOpacity>
+            {autoTagError && <Text style={s.kiError}>{autoTagError}</Text>}
 
             {/* Text-Analyse: alle Trades, Kerzendaten, keine Bilder */}
             <TouchableOpacity style={[s.kiBtn, { borderColor: '#22c55e33', marginTop: 10 }]} onPress={runTextKI} disabled={textLoading}>

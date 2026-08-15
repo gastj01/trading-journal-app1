@@ -56,6 +56,7 @@ export interface Trade {
   leverage: number
   setup: string
   notes: string
+  ki_notes: string | null
   screenshot_path: string | null
   chart_time_label: string | null
   trade_data_quality: string | null
