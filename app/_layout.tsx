@@ -5,9 +5,8 @@ import { supabase } from '../src/lib/supabase'
 import type { Session } from '@supabase/supabase-js'
 import { useRouter, useSegments } from 'expo-router'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
-import { GestureHandlerRootView } from 'react-native-gesture-handler'
-import { enableScreens } from 'react-native-screens'
 import { View, Text, ScrollView, Alert } from 'react-native'
+import { enableScreens } from 'react-native-screens'
 
 enableScreens(false)
 
@@ -78,7 +77,7 @@ export default function RootLayout() {
       onResponderGrant={e => setJsTouch(`JS locY=${e.nativeEvent.locationY.toFixed(0)} pageY=${e.nativeEvent.pageY.toFixed(0)}`)}
     >
       <Text style={{ position: 'absolute', top: 5, right: 5, zIndex: 9999, color: '#0f0', backgroundColor: '#000', fontSize: 10, padding: 2 }}>{jsTouch}</Text>
-      <GestureHandlerRootView style={{ flex: 1 }}>
+      <View style={{ flex: 1 }}>
         <SafeAreaProvider>
         <ErrorBoundary>
           <StatusBar style="light" />
@@ -94,7 +93,7 @@ export default function RootLayout() {
           </Stack>
         </ErrorBoundary>
         </SafeAreaProvider>
-      </GestureHandlerRootView>
+      </View>
     </View>
   )
 }
