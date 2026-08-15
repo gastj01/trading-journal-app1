@@ -23,6 +23,10 @@ export default function AnalyticsScreen() {
   const [kiAnalysis, setKiAnalysis] = useState<string | null>(null)
   const [kiLoading, setKiLoading] = useState(false)
   const [kiError, setKiError] = useState<string | null>(null)
+  const [visionAnalysis, setVisionAnalysis] = useState<string | null>(null)
+  const [visionLoading, setVisionLoading] = useState(false)
+  const [visionError, setVisionError] = useState<string | null>(null)
+  const [visionSaved, setVisionSaved] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -230,6 +234,102 @@ Direkt und präzise. Kein Intro.`
     } finally {
       setKiLoading(false)
     }
+  }
+
+  async function runVisionKI() {
+    if (!activeStrategy) return
+    const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
+    if (!key) { setVisionError('Kein API Key in Einstellungen gesetzt.'); return }
+
+    setVisionLoading(true)
+    setVisionError(null)
+    setVisionAnalysis(null)
+    setVisionSaved(false)
+
+    const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id && t.screenshot_path)
+    if (stratTrades.length === 0) {
+      setVisionError('Keine Screenshots für diese Strategie vorhanden.')
+      setVisionLoading(false)
+      return
+    }
+
+    const sample = stratTrades.slice(0, 10)
+    const imageUrls: string[] = []
+    for (const trade of sample) {
+      const { data } = await supabase.storage.from('trade-screenshots').createSignedUrl(trade.screenshot_path!, 3600)
+      if (data?.signedUrl) imageUrls.push(data.signedUrl)
+    }
+
+    if (imageUrls.length === 0) {
+      setVisionError('Screenshots konnten nicht geladen werden.')
+      setVisionLoading(false)
+      return
+    }
+
+    const tradeSummary = sample.map((t, i) => {
+      const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
+      return `Trade ${i + 1}: ${t.symbol} ${t.side.toUpperCase()} | Entry: ${t.entry_price} | SL: ${t.stop_loss} | Result: ${r > 0 ? '+' : ''}${r.toFixed(2)}R | Timeframe: ${t.timeframe || '—'} | Notes: ${t.notes || '—'} | Setup: ${t.setup || '—'}`
+    }).join('\n')
+
+    const prompt = `Du bist ein erfahrener Trading-Coach und Chart-Analyst.
+Analysiere diese ${imageUrls.length} Trade-Screenshots der Strategie "${activeStrategy.name}".
+${activeStrategy.description ? `\nBestehendes Regelwerk:\n${activeStrategy.description}\n` : ''}
+TRADE-DATEN:
+${tradeSummary}
+
+Identifiziere gemeinsame visuelle Muster und erstelle ein präzises Regelwerk. Antworte auf Deutsch:
+
+**SETUP-KRITERIEN:**
+[Was muss auf dem Chart erkennbar sein?]
+
+**ENTRY-TRIGGER:**
+[Was löst den Einstieg konkret aus?]
+
+**STOP LOSS:**
+[Wo und wie wird der SL platziert?]
+
+**TAKE PROFIT:**
+[TP-Ziele und RR-Erwartung]
+
+**FILTER:**
+[Was schließt ein Setup aus? Session, Wochentag, Marktbedingungen]
+
+**VORGESCHLAGENE TAGS:**
+[Konkrete Tag-Namen zum Erfassen, z.B. FVG_vorhanden, NYC_Open, Trend_klar]
+
+**VISUELLE MUSTER:**
+[Gemeinsame Chartstrukturen, Formationen, Levels die du auf den Screenshots erkennst]`
+
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 2000,
+          messages: [{
+            role: 'user',
+            content: [
+              ...imageUrls.map(url => ({ type: 'image' as const, source: { type: 'url' as const, url } })),
+              { type: 'text' as const, text: prompt },
+            ],
+          }],
+        }),
+      })
+      if (!res.ok) throw new Error(`API ${res.status}`)
+      const data = await res.json()
+      setVisionAnalysis(data.content?.[0]?.text ?? 'Keine Antwort.')
+    } catch (e: any) {
+      setVisionError(e?.message ?? 'Fehler')
+    } finally {
+      setVisionLoading(false)
+    }
+  }
+
+  async function saveAsRuleset() {
+    if (!activeStrategy || !visionAnalysis) return
+    await supabase.from('strategy_profiles').update({ description: visionAnalysis }).eq('id', activeStrategy.id)
+    setVisionSaved(true)
   }
 
   const activeStratName = selectedStrategy === null
@@ -464,6 +564,46 @@ Direkt und präzise. Kein Intro.`
                   <Feather name="refresh-cw" size={12} color="#555" />
                   <Text style={s.kiRerunText}>Neu analysieren</Text>
                 </TouchableOpacity>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={[s.kiBtn, { borderColor: '#f59e0b33', marginTop: 10 }]}
+              onPress={runVisionKI}
+              disabled={visionLoading}
+            >
+              {visionLoading
+                ? <ActivityIndicator size="small" color="#f59e0b" />
+                : <Feather name="camera" size={16} color="#f59e0b" />}
+              <Text style={[s.kiBtnText, { color: '#f59e0b' }]}>
+                {visionLoading
+                  ? 'Analysiert Screenshots...'
+                  : `Screenshots analysieren (${trades.filter(t => t.strategy_id === activeStrategy!.id && t.screenshot_path).length} verfügbar)`}
+              </Text>
+            </TouchableOpacity>
+
+            {visionError && <Text style={s.kiError}>{visionError}</Text>}
+
+            {visionAnalysis && (
+              <View style={s.kiResult}>
+                {visionAnalysis.split('\n').map((line, i) => {
+                  const isBold = line.startsWith('**') && line.includes('**', 2)
+                  if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
+                  if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
+                  return <Text key={i} style={s.kiText}>{line}</Text>
+                })}
+                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
+                  <TouchableOpacity onPress={() => setVisionAnalysis(null)} style={s.kiRerun}>
+                    <Feather name="refresh-cw" size={12} color="#555" />
+                    <Text style={s.kiRerunText}>Neu analysieren</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={saveAsRuleset} style={s.kiRerun} disabled={visionSaved}>
+                    <Feather name="save" size={12} color={visionSaved ? '#22c55e' : '#f59e0b'} />
+                    <Text style={[s.kiRerunText, { color: visionSaved ? '#22c55e' : '#f59e0b' }]}>
+                      {visionSaved ? 'Gespeichert ✓' : 'Als Regelwerk speichern'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
           </View>
