@@ -6,7 +6,10 @@ import type { Session } from '@supabase/supabase-js'
 import { useRouter, useSegments } from 'expo-router'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
+import { enableScreens } from 'react-native-screens'
 import { View, Text, ScrollView, Alert } from 'react-native'
+
+enableScreens(false)
 
 declare const global: typeof globalThis & { ErrorUtils?: { getGlobalHandler: () => ((error: Error, isFatal?: boolean) => void); setGlobalHandler: (handler: (error: Error, isFatal?: boolean) => void) => void } }
 
