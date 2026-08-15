@@ -5,10 +5,8 @@ import { supabase } from '../src/lib/supabase'
 import type { Session } from '@supabase/supabase-js'
 import { useRouter, useSegments } from 'expo-router'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
-import { enableScreens } from 'react-native-screens'
+import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { View, Text, ScrollView, Alert } from 'react-native'
-
-enableScreens()
 
 declare const global: typeof globalThis & { ErrorUtils?: { getGlobalHandler: () => ((error: Error, isFatal?: boolean) => void); setGlobalHandler: (handler: (error: Error, isFatal?: boolean) => void) => void } }
 
@@ -69,7 +67,7 @@ export default function RootLayout() {
   }, [session, loading, segments])
 
   return (
-    <View style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ErrorBoundary>
           <StatusBar style="light" />
@@ -85,6 +83,6 @@ export default function RootLayout() {
           </Stack>
         </ErrorBoundary>
       </SafeAreaProvider>
-    </View>
+    </GestureHandlerRootView>
   )
 }
