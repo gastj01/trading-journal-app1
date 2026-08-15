@@ -13,6 +13,50 @@ type Period = '7d' | '30d' | '90d' | 'all'
 
 interface TagAssignment { tag_id: string; trade_id: string }
 
+const INTERVAL_MS: Record<string, number> = {
+  '1m': 60000, '3m': 180000, '5m': 300000, '15m': 900000, '30m': 1800000,
+  '1h': 3600000, '2h': 7200000, '4h': 14400000, '6h': 21600000,
+  '8h': 28800000, '12h': 43200000, '1d': 86400000,
+}
+
+async function buildCandleText(t: Trade, maxBody = 90, pre = 30, post = 30): Promise<string | null> {
+  const interval = t.timeframe ? normalizeInterval(t.timeframe) : null
+  if (!interval || !t.opened_at || !t.closed_at) return null
+  try {
+    const symbol = normalizeSymbol(t.symbol)
+    const entryMs = new Date(t.opened_at).getTime()
+    const exitMs = new Date(t.closed_at).getTime()
+    const candleMs = INTERVAL_MS[interval] ?? 900000
+    const candles = await fetchCandles(symbol, interval, entryMs - pre * candleMs, exitMs + post * candleMs)
+    if (candles.length === 0) return null
+
+    const entryIdx = candles.findIndex(c => c.openTime >= entryMs)
+    const exitIdx = candles.findIndex(c => c.openTime >= exitMs)
+    const preSlice = candles.slice(0, Math.max(entryIdx, 0)).slice(-pre)
+    const body = exitIdx > entryIdx ? candles.slice(entryIdx, exitIdx + 1) : candles.slice(entryIdx, entryIdx + 1)
+    const postSlice = candles.slice(Math.min(exitIdx + 1, candles.length)).slice(0, post)
+
+    let sampledBody = body
+    if (body.length > maxBody) {
+      const step = body.length / maxBody
+      sampledBody = Array.from({ length: maxBody }, (_, i) => body[Math.round(i * step)]).filter(Boolean)
+    }
+
+    const display = [...preSlice, ...sampledBody, ...postSlice]
+    const entryIdxD = preSlice.length
+    const exitIdxD = preSlice.length + sampledBody.length - 1
+
+    const rows = display.map((c, i) => {
+      const dt = new Date(c.openTime)
+      const ts = `${dt.getUTCMonth() + 1}/${dt.getUTCDate()} ${String(dt.getUTCHours()).padStart(2, '0')}:${String(dt.getUTCMinutes()).padStart(2, '0')}`
+      const mark = i === entryIdxD ? ' ← ENTRY' : i === exitIdxD ? ' ← EXIT' : ''
+      return `${ts} O:${c.open} H:${c.high} L:${c.low} C:${c.close}${mark}`
+    })
+    if (body.length > maxBody) rows.splice(entryIdxD + 1, 0, `... (${body.length - maxBody} ausgedünnt)`)
+    return rows.join('\n')
+  } catch { return null }
+}
+
 export default function AnalyticsScreen() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [strategies, setStrategies] = useState<StrategyProfile[]>([])
@@ -28,6 +72,10 @@ export default function AnalyticsScreen() {
   const [visionLoading, setVisionLoading] = useState(false)
   const [visionError, setVisionError] = useState<string | null>(null)
   const [visionSaved, setVisionSaved] = useState(false)
+  const [textAnalysis, setTextAnalysis] = useState<string | null>(null)
+  const [textLoading, setTextLoading] = useState(false)
+  const [textError, setTextError] = useState<string | null>(null)
+  const [textSaved, setTextSaved] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -237,6 +285,79 @@ Direkt und präzise. Kein Intro.`
     }
   }
 
+  async function runTextKI() {
+    if (!activeStrategy) return
+    const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
+    if (!key) { setTextError('Kein API Key in Einstellungen gesetzt.'); return }
+
+    setTextLoading(true)
+    setTextError(null)
+    setTextAnalysis(null)
+    setTextSaved(false)
+
+    const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id)
+    if (stratTrades.length === 0) {
+      setTextError('Keine Trades für diese Strategie.')
+      setTextLoading(false)
+      return
+    }
+
+    const tradeBlocks = await Promise.all(stratTrades.map(async (t, i) => {
+      const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
+      const header = `Trade ${i + 1}: ${t.symbol} ${t.side.toUpperCase()} | Entry:${t.entry_price} SL:${t.stop_loss} Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'} | Notes:${t.notes || '—'} | Setup:${t.setup || '—'}`
+      const candleText = await buildCandleText(t)
+      return header + (candleText ? `\nKERZEN (UTC):\n${candleText}` : '\n(Kein Timeframe — keine Kerzendaten)')
+    }))
+
+    const prompt = `Du bist ein erfahrener Trading-Coach. Analysiere diese ${stratTrades.length} Trades der Strategie "${activeStrategy.name}" anhand der Kerzendaten und Notizen.
+${activeStrategy.description ? `\nBestehendes Regelwerk:\n${activeStrategy.description}\n` : ''}
+ENTRY und EXIT sind in den Kerzendaten markiert.
+
+${tradeBlocks.join('\n\n---\n\n')}
+
+Erstelle ein präzises Regelwerk auf Deutsch:
+
+**SETUP-KRITERIEN:**
+[Was muss vorliegen?]
+
+**ENTRY-TRIGGER:**
+[Exakter Einstieg — Kerzenmuster, Level, Timing]
+
+**STOP LOSS:**
+[Platzierungsregel mit typischen Abständen in Punkten/Pips]
+
+**TAKE PROFIT:**
+[TP-Ziele und RR-Erwartung]
+
+**FILTER:**
+[Was schließt ein Setup aus?]
+
+**VORGESCHLAGENE TAGS:**
+[Tag-Namen zum Erfassen, z.B. FVG_vorhanden, NYC_Open]
+
+**MUSTER AUS DEN DATEN:**
+[Wiederkehrende Zahlen, Zeitpunkte, Kerzenmuster die du erkennst]`
+
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 2000,
+          messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+        }),
+      })
+      if (!res.ok) throw new Error(`API ${res.status}`)
+      const data = await res.json()
+      setTextAnalysis(data.content?.[0]?.text ?? 'Keine Antwort.')
+    } catch (e: any) {
+      setTextError(e?.message ?? 'Fehler')
+    } finally {
+      setTextLoading(false)
+    }
+  }
+
   async function runVisionKI() {
     if (!activeStrategy) return
     const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
@@ -254,7 +375,12 @@ Direkt und präzise. Kein Intro.`
       return
     }
 
-    const sample = stratTrades.slice(0, 10)
+    // Auto-select: best 4 + worst 4 by R (most representative)
+    const withR = stratTrades.map(t => ({ t, r: calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0 }))
+      .sort((a, b) => b.r - a.r)
+    const best = withR.slice(0, 4).map(x => x.t)
+    const worst = withR.slice(-4).map(x => x.t)
+    const sample = [...new Map([...best, ...worst].map(t => [t.id, t])).values()].slice(0, 8)
 
     // Fetch signed URLs + candles per trade in parallel per trade
     type TradeData = {
@@ -267,63 +393,20 @@ Direkt und präzise. Kein Intro.`
     const tradeDataList: TradeData[] = await Promise.all(sample.map(async t => {
       const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
 
-      // Screenshot URL
-      const { data: urlData } = await supabase.storage.from('trade-screenshots').createSignedUrl(t.screenshot_path!, 3600)
-      const imageUrl = urlData?.signedUrl ?? null
-
-      // Candles: 30 before entry, full trade, 30 after exit
-      let candleText: string | null = null
-      const interval = t.timeframe ? normalizeInterval(t.timeframe) : null
-      if (interval && t.opened_at && t.closed_at) {
-        try {
-          const symbol = normalizeSymbol(t.symbol)
-          const entryMs = new Date(t.opened_at).getTime()
-          const exitMs = new Date(t.closed_at).getTime()
-
-          // Calculate 30-candle offset in ms
-          const intervalMs: Record<string, number> = {
-            '1m': 60000, '3m': 180000, '5m': 300000, '15m': 900000, '30m': 1800000,
-            '1h': 3600000, '2h': 7200000, '4h': 14400000, '6h': 21600000,
-            '8h': 28800000, '12h': 43200000, '1d': 86400000,
-          }
-          const candleMs = intervalMs[interval] ?? 900000
-          const startMs = entryMs - 30 * candleMs
-          const endMs = exitMs + 30 * candleMs
-
-          const candles = await fetchCandles(symbol, interval, startMs, endMs)
-          if (candles.length > 0) {
-            const entryIdx = candles.findIndex(c => c.openTime >= entryMs)
-            const exitIdx = candles.findIndex(c => c.openTime >= exitMs)
-
-            // Cap at 150 candles total: keep 30 before entry, up to 90 trade body, 30 after exit
-            // If trade body > 90 candles, subsample evenly
-            const pre = candles.slice(0, Math.max(entryIdx, 0)).slice(-30)
-            const body = exitIdx > entryIdx ? candles.slice(entryIdx, exitIdx + 1) : candles.slice(entryIdx, entryIdx + 1)
-            const post = candles.slice(Math.min(exitIdx + 1, candles.length)).slice(0, 30)
-
-            let sampledBody = body
-            if (body.length > 90) {
-              const step = body.length / 90
-              sampledBody = Array.from({ length: 90 }, (_, i) => body[Math.round(i * step)])
-                .filter(Boolean)
-            }
-
-            const display = [...pre, ...sampledBody, ...post]
-            const entryIdxD = pre.length
-            const exitIdxD = pre.length + sampledBody.length - 1
-
-            const rows = display.map((c, i) => {
-              const isEntry = i === entryIdxD ? ' ← ENTRY' : ''
-              const isExit = i === exitIdxD ? ' ← EXIT' : ''
-              const dt = new Date(c.openTime)
-              const ts = `${dt.getUTCMonth() + 1}/${dt.getUTCDate()} ${String(dt.getUTCHours()).padStart(2, '0')}:${String(dt.getUTCMinutes()).padStart(2, '0')}`
-              return `${ts} O:${c.open} H:${c.high} L:${c.low} C:${c.close}${isEntry}${isExit}`
-            })
-            if (body.length > 90) rows.splice(entryIdxD + 1, 0, `... (${body.length - 90} Kerzen ausgedünnt)`)
-            candleText = rows.join('\n')
-          }
-        } catch { /* Binance error: skip candles for this trade */ }
+      // Screenshot URL — try compressed (Pro plan), fallback to original
+      let imageUrl: string | null = null
+      try {
+        const { data: compressed } = await supabase.storage.from('trade-screenshots')
+          .createSignedUrl(t.screenshot_path!, 3600, { transform: { width: 800, quality: 70 } })
+        imageUrl = compressed?.signedUrl ?? null
+      } catch { /* ignore */ }
+      if (!imageUrl) {
+        const { data: orig } = await supabase.storage.from('trade-screenshots').createSignedUrl(t.screenshot_path!, 3600)
+        imageUrl = orig?.signedUrl ?? null
       }
+
+      // Vision mode: shorter candles (20+40+20), images provide visual context
+      const candleText = await buildCandleText(t, 40, 20, 20)
 
       return { trade: t, imageUrl, candleText, r }
     }))
@@ -398,15 +481,15 @@ Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte a
     }
   }
 
-  async function saveAsRuleset() {
-    if (!activeStrategy || !visionAnalysis) return
+  async function saveAsRuleset(analysis: string, onSaved: () => void) {
+    if (!activeStrategy || !analysis) return
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    await supabase.from('strategy_profiles').update({ description: visionAnalysis }).eq('id', activeStrategy.id)
+    await supabase.from('strategy_profiles').update({ description: analysis }).eq('id', activeStrategy.id)
 
     // Parse VORGESCHLAGENE TAGS section
-    const tagsMatch = visionAnalysis.match(/\*\*VORGESCHLAGENE TAGS[:\*]*\*?\*?([\s\S]*?)(?:\*\*[A-Z]|$)/)
+    const tagsMatch = analysis.match(/\*\*VORGESCHLAGENE TAGS[:\*]*\*?\*?([\s\S]*?)(?:\*\*[A-Z]|$)/)
     if (tagsMatch) {
       const rawLines = tagsMatch[1].split('\n').map(l => l.trim()).filter(Boolean)
       const tagNames: string[] = []
@@ -438,7 +521,7 @@ Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte a
       }
     }
 
-    setVisionSaved(true)
+    onSaved()
   }
 
   const activeStratName = selectedStrategy === null
@@ -650,17 +733,12 @@ Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte a
 
         {activeStrategy && (
           <View style={s.section}>
+            {/* Existing performance KI */}
             <TouchableOpacity style={s.kiBtn} onPress={runStrategyKI} disabled={kiLoading}>
-              {kiLoading
-                ? <ActivityIndicator size="small" color="#818cf8" />
-                : <Feather name="cpu" size={16} color="#818cf8" />}
-              <Text style={s.kiBtnText}>
-                {kiLoading ? 'Analysiert...' : `"${activeStrategy.name}" mit KI bewerten`}
-              </Text>
+              {kiLoading ? <ActivityIndicator size="small" color="#818cf8" /> : <Feather name="cpu" size={16} color="#818cf8" />}
+              <Text style={s.kiBtnText}>{kiLoading ? 'Analysiert...' : `"${activeStrategy.name}" mit KI bewerten`}</Text>
             </TouchableOpacity>
-
             {kiError && <Text style={s.kiError}>{kiError}</Text>}
-
             {kiAnalysis && (
               <View style={s.kiResult}>
                 {kiAnalysis.split('\n').map((line, i) => {
@@ -676,25 +754,49 @@ Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte a
               </View>
             )}
 
-            <TouchableOpacity
-              style={[s.kiBtn, { borderColor: '#f59e0b33', marginTop: 10 }]}
-              onPress={runVisionKI}
-              disabled={visionLoading}
-            >
-              {visionLoading
-                ? <ActivityIndicator size="small" color="#f59e0b" />
-                : <Feather name="camera" size={16} color="#f59e0b" />}
-              <Text style={[s.kiBtnText, { color: '#f59e0b' }]}>
-                {visionLoading
-                  ? 'Analysiert Screenshots...'
-                  : `Screenshots analysieren (${trades.filter(t => t.strategy_id === activeStrategy!.id && t.screenshot_path).length} verfügbar)`}
+            {/* Text-Analyse: alle Trades, Kerzendaten, keine Bilder */}
+            <TouchableOpacity style={[s.kiBtn, { borderColor: '#22c55e33', marginTop: 10 }]} onPress={runTextKI} disabled={textLoading}>
+              {textLoading ? <ActivityIndicator size="small" color="#22c55e" /> : <Feather name="bar-chart-2" size={16} color="#22c55e" />}
+              <Text style={[s.kiBtnText, { color: '#22c55e' }]}>
+                {textLoading ? 'Analysiert Kerzendaten...' : `Kerzen-Analyse (alle ${trades.filter(t => t.strategy_id === activeStrategy!.id).length} Trades)`}
               </Text>
             </TouchableOpacity>
+            {textError && <Text style={s.kiError}>{textError}</Text>}
+            {textAnalysis && (
+              <View style={s.kiResult}>
+                <Text style={[s.kiHeading, { color: '#22c55e', marginBottom: 6 }]}>Kerzen-Analyse</Text>
+                {textAnalysis.split('\n').map((line, i) => {
+                  const isBold = line.startsWith('**') && line.includes('**', 2)
+                  if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
+                  if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
+                  return <Text key={i} style={s.kiText}>{line}</Text>
+                })}
+                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
+                  <TouchableOpacity onPress={() => setTextAnalysis(null)} style={s.kiRerun}>
+                    <Feather name="refresh-cw" size={12} color="#555" />
+                    <Text style={s.kiRerunText}>Neu analysieren</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => saveAsRuleset(textAnalysis, () => setTextSaved(true))} style={s.kiRerun} disabled={textSaved}>
+                    <Feather name="save" size={12} color={textSaved ? '#22c55e' : '#f59e0b'} />
+                    <Text style={[s.kiRerunText, { color: textSaved ? '#22c55e' : '#f59e0b' }]}>
+                      {textSaved ? 'Gespeichert ✓' : 'Regelwerk + Tags speichern'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
 
+            {/* Vision-Analyse: beste 4 + schlechteste 4, mit Screenshots */}
+            <TouchableOpacity style={[s.kiBtn, { borderColor: '#f59e0b33', marginTop: 10 }]} onPress={runVisionKI} disabled={visionLoading}>
+              {visionLoading ? <ActivityIndicator size="small" color="#f59e0b" /> : <Feather name="camera" size={16} color="#f59e0b" />}
+              <Text style={[s.kiBtnText, { color: '#f59e0b' }]}>
+                {visionLoading ? 'Analysiert Screenshots...' : `Vision-Analyse (beste 4 + schlechteste 4 von ${trades.filter(t => t.strategy_id === activeStrategy!.id && t.screenshot_path).length} Screenshots)`}
+              </Text>
+            </TouchableOpacity>
             {visionError && <Text style={s.kiError}>{visionError}</Text>}
-
             {visionAnalysis && (
               <View style={s.kiResult}>
+                <Text style={[s.kiHeading, { color: '#f59e0b', marginBottom: 6 }]}>Vision-Analyse</Text>
                 {visionAnalysis.split('\n').map((line, i) => {
                   const isBold = line.startsWith('**') && line.includes('**', 2)
                   if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
@@ -706,7 +808,7 @@ Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte a
                     <Feather name="refresh-cw" size={12} color="#555" />
                     <Text style={s.kiRerunText}>Neu analysieren</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={saveAsRuleset} style={s.kiRerun} disabled={visionSaved}>
+                  <TouchableOpacity onPress={() => saveAsRuleset(visionAnalysis, () => setVisionSaved(true))} style={s.kiRerun} disabled={visionSaved}>
                     <Feather name="save" size={12} color={visionSaved ? '#22c55e' : '#f59e0b'} />
                     <Text style={[s.kiRerunText, { color: visionSaved ? '#22c55e' : '#f59e0b' }]}>
                       {visionSaved ? 'Gespeichert ✓' : 'Regelwerk + Tags speichern'}
