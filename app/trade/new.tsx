@@ -1,13 +1,24 @@
 import { useState, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
+import * as DocumentPicker from 'expo-document-picker'
+import * as FileSystem from 'expo-file-system/legacy'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../src/lib/supabase'
 import { nowDateStr, nowTimeStr, parseDateTimeToISO } from '../../src/lib/datetime'
 import { DateTimeInputs } from '../../src/components/DateTimeInputs'
 import { CandleTimePicker } from '../../src/components/CandleTimePicker'
+import { fetchCandles, normalizeSymbol, normalizeInterval } from '../../src/lib/binance'
+import { ANTHROPIC_KEY } from '../(tabs)/settings'
 import type { TradingAccount, StrategyProfile, TagDefinition, ChecklistItem } from '../../src/types'
+
+const INTERVAL_MS: Record<string, number> = {
+  '1m': 60000, '3m': 180000, '5m': 300000, '15m': 900000, '30m': 1800000,
+  '1h': 3600000, '2h': 7200000, '4h': 14400000, '6h': 21600000,
+  '8h': 28800000, '12h': 43200000, '1d': 86400000,
+}
 
 export default function NewTradeScreen() {
   const router = useRouter()
@@ -19,6 +30,11 @@ export default function NewTradeScreen() {
   const [rulesExpanded, setRulesExpanded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [showCandlePicker, setShowCandlePicker] = useState(false)
+  const [screenshotPath, setScreenshotPath] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [kiPlanLoading, setKiPlanLoading] = useState(false)
+  const [kiPlanResult, setKiPlanResult] = useState<string | null>(null)
+  const [kiPlanError, setKiPlanError] = useState<string | null>(null)
   const [tpLevels, setTpLevels] = useState<{ price: string; qty: string }[]>([])
   const [bePrice, setBePrice] = useState('')
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
@@ -127,6 +143,137 @@ export default function NewTradeScreen() {
     )
   }
 
+  async function handlePickScreenshot() {
+    const result = await DocumentPicker.getDocumentAsync({ type: 'image/*', copyToCacheDirectory: true })
+    if (result.canceled) return
+    const file = result.assets[0]
+    if (!file) return
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    setUploading(true)
+    try {
+      const ext = file.name.split('.').pop() ?? 'jpg'
+      const path = `${user.id}/plan_${Date.now()}.${ext}`
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
+      if (!token) throw new Error('Nicht eingeloggt')
+
+      const uploadUrl = `https://rujvwpddxxfbyibvwkgt.supabase.co/storage/v1/object/trade-screenshots/${path}`
+      const uploadResult = await FileSystem.uploadAsync(uploadUrl, file.uri, {
+        httpMethod: 'POST',
+        uploadType: 1,
+        fieldName: 'file',
+        mimeType: file.mimeType ?? 'image/jpeg',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'apikey': 'sb_publishable_vL5irZwQawERH65Q6pxXrA_GfDCrEr2',
+          'x-upsert': 'true',
+        },
+      })
+      if (uploadResult.status >= 300) {
+        Alert.alert('Upload-Fehler', `HTTP ${uploadResult.status}`)
+      } else {
+        setScreenshotPath(path)
+        setKiPlanResult(null)
+      }
+    } catch (e: any) {
+      Alert.alert('Fehler', e?.message ?? 'Unbekannter Fehler')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function runKiPlanReview() {
+    const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
+    if (!key) { setKiPlanError('Kein API Key in Einstellungen gesetzt.'); return }
+    if (!selectedStrategy?.description) { setKiPlanError('Keine Strategie mit Regelwerk ausgewählt.'); return }
+
+    setKiPlanLoading(true)
+    setKiPlanError(null)
+    setKiPlanResult(null)
+
+    // Load pre-entry candles for context
+    let candleText = ''
+    try {
+      const interval = normalizeInterval(form.timeframe)
+      const entryMs = parseDateTimeToISO(form.trade_date, form.trade_time)
+        ? new Date(parseDateTimeToISO(form.trade_date, form.trade_time)!).getTime()
+        : Date.now()
+      const candleMs = INTERVAL_MS[interval] ?? 900000
+      const candles = await fetchCandles(normalizeSymbol(form.symbol), interval, entryMs - 50 * candleMs, entryMs + candleMs)
+      if (candles.length > 0) {
+        const rows = candles.slice(-50).map(c => {
+          const dt = new Date(c.openTime)
+          const ts = `${dt.getUTCMonth() + 1}/${dt.getUTCDate()} ${String(dt.getUTCHours()).padStart(2, '0')}:${String(dt.getUTCMinutes()).padStart(2, '0')}`
+          return `${ts} O:${c.open} H:${c.high} L:${c.low} C:${c.close}`
+        })
+        candleText = rows.join('\n') + '\n← GEPLANTER ENTRY'
+      }
+    } catch { /* ignore — still useful without candles */ }
+
+    // Screenshot URL
+    let imageUrl: string | null = null
+    if (screenshotPath) {
+      try {
+        const { data: compressed } = await supabase.storage.from('trade-screenshots')
+          .createSignedUrl(screenshotPath, 3600, { transform: { width: 800, quality: 70 } })
+        imageUrl = compressed?.signedUrl ?? null
+      } catch { /* ignore */ }
+      if (!imageUrl) {
+        const { data: orig } = await supabase.storage.from('trade-screenshots').createSignedUrl(screenshotPath, 3600)
+        imageUrl = orig?.signedUrl ?? null
+      }
+    }
+
+    const prompt = `Du bist ein erfahrener Trading-Coach. Bewerte diesen geplanten Trade gegen das Strategie-Regelwerk.
+
+REGELWERK "${selectedStrategy.name}":
+${selectedStrategy.description}
+
+GEPLANTER TRADE:
+Symbol: ${form.symbol} | ${form.side.toUpperCase()} | TF: ${form.timeframe}
+Entry: ${form.entry_price || '—'} | SL: ${form.stop_loss || '—'}
+${form.entry_price && form.stop_loss ? `RR bis SL: 1:1 (SL-Abstand: ${Math.abs(parseFloat(form.entry_price) - parseFloat(form.stop_loss)).toFixed(4)})` : ''}
+Setup: ${form.setup || '—'}
+Plan/Notizen: ${form.notes || '—'}
+${candleText ? `\nKERZEN VOR ENTRY (UTC):\n${candleText}` : ''}
+
+Bewerte auf Deutsch:
+
+**REGELWERK-KONFORMITÄT:** ✅ / ⚠️ / ❌
+[Entspricht der Trade dem Regelwerk? Welche Kriterien sind erfüllt, welche nicht?]
+
+**STÄRKEN DES SETUPS:**
+[Was spricht für diesen Trade?]
+
+**RISIKEN / WARNSIGNALE:**
+[Was spricht dagegen oder fehlt?]
+
+**EMPFEHLUNG:** Trade nehmen / Warten / Nicht nehmen
+[Kurze Begründung]`
+
+    try {
+      const content: any[] = imageUrl
+        ? [{ type: 'image', source: { type: 'url', url: imageUrl } }, { type: 'text', text: prompt }]
+        : [{ type: 'text', text: prompt }]
+
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1000, messages: [{ role: 'user', content }] }),
+      })
+      if (!res.ok) throw new Error(`API ${res.status}`)
+      const data = await res.json()
+      setKiPlanResult(data.content?.[0]?.text ?? 'Keine Antwort.')
+    } catch (e: any) {
+      setKiPlanError(e?.message ?? 'Fehler')
+    } finally {
+      setKiPlanLoading(false)
+    }
+  }
+
   async function handleSave() {
     if (!form.entry_price || !form.stop_loss || !form.account_id) {
       Alert.alert('Fehler', 'Entry, SL und Konto sind Pflichtfelder.')
@@ -187,6 +334,7 @@ export default function NewTradeScreen() {
       setup: form.setup,
       notes: form.notes,
       trade_data_quality: form.trade_data_quality,
+      screenshot_path: screenshotPath || null,
       opened_at: openedAt,
     }).select().single()
 
@@ -471,6 +619,53 @@ export default function NewTradeScreen() {
         <Label text="Notizen" />
         <Input value={form.notes} onChangeText={v => update('notes', v)} multiline numberOfLines={3} />
 
+        <Label text="Screenshot" />
+        <TouchableOpacity style={s.screenshotBtn} onPress={handlePickScreenshot} disabled={uploading}>
+          {uploading
+            ? <ActivityIndicator size="small" color="#666" />
+            : <Feather name={screenshotPath ? 'check-circle' : 'upload'} size={16} color={screenshotPath ? '#22c55e' : '#666'} />}
+          <Text style={[s.screenshotText, screenshotPath ? s.screenshotTextDone : null]}>
+            {uploading ? 'Lädt hoch...' : screenshotPath ? 'Screenshot hochgeladen ✓' : 'Screenshot hochladen (optional)'}
+          </Text>
+        </TouchableOpacity>
+        {screenshotPath ? (
+          <TouchableOpacity onPress={() => { setScreenshotPath(''); setKiPlanResult(null) }} style={{ paddingVertical: 4 }}>
+            <Text style={{ color: '#ef4444', fontSize: 12 }}>Entfernen</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {selectedStrategy?.description && (
+          <>
+            <TouchableOpacity
+              style={[s.screenshotBtn, { borderColor: '#7c3aed33', marginTop: 8 }]}
+              onPress={runKiPlanReview}
+              disabled={kiPlanLoading}
+            >
+              {kiPlanLoading
+                ? <ActivityIndicator size="small" color="#7c3aed" />
+                : <Feather name="cpu" size={16} color="#7c3aed" />}
+              <Text style={[s.screenshotText, { color: '#7c3aed' }]}>
+                {kiPlanLoading ? 'KI bewertet...' : screenshotPath ? 'Trade-Plan bewerten (mit Screenshot)' : 'Trade-Plan bewerten'}
+              </Text>
+            </TouchableOpacity>
+            {kiPlanError && <Text style={{ color: '#ef4444', fontSize: 13, marginTop: 4 }}>{kiPlanError}</Text>}
+            {kiPlanResult && (
+              <View style={s.kiResultBox}>
+                {kiPlanResult.split('\n').map((line, i) => {
+                  const isBold = line.startsWith('**') && line.includes('**', 2)
+                  if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
+                  if (line.trim() === '') return <View key={i} style={{ height: 5 }} />
+                  return <Text key={i} style={s.kiText}>{line}</Text>
+                })}
+                <TouchableOpacity onPress={() => setKiPlanResult(null)} style={{ marginTop: 10, alignSelf: 'center', flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+                  <Feather name="refresh-cw" size={12} color="#555" />
+                  <Text style={{ color: '#555', fontSize: 12 }}>Neu bewerten</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
+        )}
+
         {filteredTags.length > 0 && (
           <>
             <Label text="Tags" />
@@ -587,4 +782,10 @@ const s = StyleSheet.create({
   catBadgeText: { color: '#888', fontSize: 11 },
   candleBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 2 },
   candleBtnTxt: { color: '#3b82f6', fontSize: 13, fontWeight: '600' },
+  screenshotBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, borderWidth: 1, borderColor: '#2a2a2a', marginTop: 4 },
+  screenshotText: { color: '#666', fontSize: 14 },
+  screenshotTextDone: { color: '#22c55e' },
+  kiResultBox: { backgroundColor: '#111', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#1e1e1e' },
+  kiHeading: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 10, marginBottom: 2 },
+  kiText: { color: '#bbb', fontSize: 13, lineHeight: 20 },
 })

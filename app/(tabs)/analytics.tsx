@@ -68,14 +68,10 @@ export default function AnalyticsScreen() {
   const [kiAnalysis, setKiAnalysis] = useState<string | null>(null)
   const [kiLoading, setKiLoading] = useState(false)
   const [kiError, setKiError] = useState<string | null>(null)
-  const [visionAnalysis, setVisionAnalysis] = useState<string | null>(null)
-  const [visionLoading, setVisionLoading] = useState(false)
-  const [visionError, setVisionError] = useState<string | null>(null)
-  const [visionSaved, setVisionSaved] = useState(false)
-  const [textAnalysis, setTextAnalysis] = useState<string | null>(null)
-  const [textLoading, setTextLoading] = useState(false)
-  const [textError, setTextError] = useState<string | null>(null)
-  const [textSaved, setTextSaved] = useState(false)
+  const [combinedAnalysis, setCombinedAnalysis] = useState<string | null>(null)
+  const [combinedLoading, setCombinedLoading] = useState(false)
+  const [combinedError, setCombinedError] = useState<string | null>(null)
+  const [combinedSaved, setCombinedSaved] = useState(false)
   const [autoTagLoading, setAutoTagLoading] = useState(false)
   const [autoTagProgress, setAutoTagProgress] = useState('')
   const [autoTagError, setAutoTagError] = useState<string | null>(null)
@@ -383,46 +379,88 @@ ${tradeBlocks.join('\n\n---\n\n')}
     setAutoTagProgress('')
   }
 
-  async function runTextKI() {
+  async function runCombinedKI() {
     if (!activeStrategy) return
     const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
-    if (!key) { setTextError('Kein API Key in Einstellungen gesetzt.'); return }
+    if (!key) { setCombinedError('Kein API Key in Einstellungen gesetzt.'); return }
 
-    setTextLoading(true)
-    setTextError(null)
-    setTextAnalysis(null)
-    setTextSaved(false)
+    setCombinedLoading(true)
+    setCombinedError(null)
+    setCombinedAnalysis(null)
+    setCombinedSaved(false)
 
     const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id)
     if (stratTrades.length === 0) {
-      setTextError('Keine Trades für diese Strategie.')
-      setTextLoading(false)
+      setCombinedError('Keine Trades für diese Strategie.')
+      setCombinedLoading(false)
       return
     }
 
-    const tradeBlocks = await Promise.all(stratTrades.map(async (t, i) => {
+    // All trades with candle data
+    const allTradeBlocks = await Promise.all(stratTrades.map(async (t, i) => {
       const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
       const header = `Trade ${i + 1}: ${t.symbol} ${t.side.toUpperCase()} | Entry:${t.entry_price} SL:${t.stop_loss} Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'} | Notes:${t.notes || '—'} | Setup:${t.setup || '—'}`
-      const candleText = await buildCandleText(t)
-      return header + (candleText ? `\nKERZEN (UTC):\n${candleText}` : '\n(Kein Timeframe — keine Kerzendaten)')
+      const candleText = t.screenshot_path
+        ? await buildCandleText(t, 40, 20, 20)  // shorter for vision trades — screenshot fills detail
+        : await buildCandleText(t)
+      return { t, r, header, candleText }
     }))
 
-    const prompt = `Du bist ein erfahrener Trading-Coach. Analysiere diese ${stratTrades.length} Trades der Strategie "${activeStrategy.name}" anhand der Kerzendaten und Notizen.
+    // Best 4 + worst 4 with screenshots → vision sample
+    const withScreenshot = allTradeBlocks.filter(d => d.t.screenshot_path)
+    const sorted = [...withScreenshot].sort((a, b) => b.r - a.r)
+    const visionSample = [...new Map([
+      ...sorted.slice(0, 4),
+      ...sorted.slice(-4),
+    ].map(d => [d.t.id, d])).values()].slice(0, 8)
+
+    // Fetch signed URLs for vision sample
+    type VisionData = { tradeIdx: number; imageUrl: string }
+    const visionData: VisionData[] = (await Promise.all(visionSample.map(async d => {
+      let imageUrl: string | null = null
+      try {
+        const { data: compressed } = await supabase.storage.from('trade-screenshots')
+          .createSignedUrl(d.t.screenshot_path!, 3600, { transform: { width: 800, quality: 70 } })
+        imageUrl = compressed?.signedUrl ?? null
+      } catch { /* ignore */ }
+      if (!imageUrl) {
+        const { data: orig } = await supabase.storage.from('trade-screenshots').createSignedUrl(d.t.screenshot_path!, 3600)
+        imageUrl = orig?.signedUrl ?? null
+      }
+      const tradeIdx = stratTrades.findIndex(t => t.id === d.t.id)
+      return imageUrl ? { tradeIdx: tradeIdx + 1, imageUrl } : null
+    }))).filter(Boolean) as VisionData[]
+
+    const hasImages = visionData.length > 0
+    const visionTradeNums = new Set(visionData.map(v => v.tradeIdx))
+
+    const textBlocks = allTradeBlocks.map(({ header, candleText, t }, i) => {
+      const num = i + 1
+      const screenshotNote = visionTradeNums.has(num) ? ' [Screenshot oben]' : ''
+      return header + screenshotNote + (candleText ? `\nKERZEN (UTC):\n${candleText}` : '\n(Kein Timeframe)')
+    }).join('\n\n---\n\n')
+
+    const visionIntro = hasImages
+      ? `Die ersten ${visionData.length} Bilder oben zeigen Trade-Screenshots (beste + schlechteste Trades nach R). Im Textblock sind die zugehörigen Trades mit "[Screenshot oben]" markiert.\n\n`
+      : ''
+
+    const prompt = `Du bist ein erfahrener Trading-Coach und Chart-Analyst.
+Analysiere alle ${stratTrades.length} Trades der Strategie "${activeStrategy.name}".
 ${activeStrategy.description ? `\nBestehendes Regelwerk:\n${activeStrategy.description}\n` : ''}
-ENTRY und EXIT sind in den Kerzendaten markiert.
+${visionIntro}ALLE TRADES MIT KERZENDATEN (UTC — ENTRY/EXIT markiert):
 
-${tradeBlocks.join('\n\n---\n\n')}
+${textBlocks}
 
-Erstelle ein präzises Regelwerk auf Deutsch:
+Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} ein präzises Regelwerk. Antworte auf Deutsch:
 
 **SETUP-KRITERIEN:**
-[Was muss vorliegen?]
+[Was muss vorliegen — Chart-Struktur, Kontext, Session]
 
 **ENTRY-TRIGGER:**
-[Exakter Einstieg — Kerzenmuster, Level, Timing]
+[Exakter Einstieg — Kerzenmuster, Level, Zeitpunkt]
 
 **STOP LOSS:**
-[Platzierungsregel mit typischen Abständen in Punkten/Pips]
+[Platzierungsregel mit typischen Abständen]
 
 **TAKE PROFIT:**
 [TP-Ziele und RR-Erwartung]
@@ -431,151 +469,35 @@ Erstelle ein präzises Regelwerk auf Deutsch:
 [Was schließt ein Setup aus?]
 
 **VORGESCHLAGENE TAGS:**
-[Tag-Namen zum Erfassen, z.B. FVG_vorhanden, NYC_Open]
-
-**MUSTER AUS DEN DATEN:**
-[Wiederkehrende Zahlen, Zeitpunkte, Kerzenmuster die du erkennst]`
-
-    try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 2000,
-          messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
-        }),
-      })
-      if (!res.ok) throw new Error(`API ${res.status}`)
-      const data = await res.json()
-      setTextAnalysis(data.content?.[0]?.text ?? 'Keine Antwort.')
-    } catch (e: any) {
-      setTextError(e?.message ?? 'Fehler')
-    } finally {
-      setTextLoading(false)
-    }
-  }
-
-  async function runVisionKI() {
-    if (!activeStrategy) return
-    const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
-    if (!key) { setVisionError('Kein API Key in Einstellungen gesetzt.'); return }
-
-    setVisionLoading(true)
-    setVisionError(null)
-    setVisionAnalysis(null)
-    setVisionSaved(false)
-
-    const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id && t.screenshot_path)
-    if (stratTrades.length === 0) {
-      setVisionError('Keine Screenshots für diese Strategie vorhanden.')
-      setVisionLoading(false)
-      return
-    }
-
-    // Auto-select: best 4 + worst 4 by R (most representative)
-    const withR = stratTrades.map(t => ({ t, r: calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0 }))
-      .sort((a, b) => b.r - a.r)
-    const best = withR.slice(0, 4).map(x => x.t)
-    const worst = withR.slice(-4).map(x => x.t)
-    const sample = [...new Map([...best, ...worst].map(t => [t.id, t])).values()].slice(0, 8)
-
-    // Fetch signed URLs + candles per trade in parallel per trade
-    type TradeData = {
-      trade: typeof sample[0]
-      imageUrl: string | null
-      candleText: string | null
-      r: number
-    }
-
-    const tradeDataList: TradeData[] = await Promise.all(sample.map(async t => {
-      const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
-
-      // Screenshot URL — try compressed (Pro plan), fallback to original
-      let imageUrl: string | null = null
-      try {
-        const { data: compressed } = await supabase.storage.from('trade-screenshots')
-          .createSignedUrl(t.screenshot_path!, 3600, { transform: { width: 800, quality: 70 } })
-        imageUrl = compressed?.signedUrl ?? null
-      } catch { /* ignore */ }
-      if (!imageUrl) {
-        const { data: orig } = await supabase.storage.from('trade-screenshots').createSignedUrl(t.screenshot_path!, 3600)
-        imageUrl = orig?.signedUrl ?? null
-      }
-
-      // Vision mode: shorter candles (20+40+20), images provide visual context
-      const candleText = await buildCandleText(t, 40, 20, 20)
-
-      return { trade: t, imageUrl, candleText, r }
-    }))
-
-    const withImages = tradeDataList.filter(d => d.imageUrl)
-    if (withImages.length === 0) {
-      setVisionError('Screenshots konnten nicht geladen werden.')
-      setVisionLoading(false)
-      return
-    }
-
-    const tradeBlocks = tradeDataList.map((d, i) => {
-      const t = d.trade
-      const header = `Trade ${i + 1}: ${t.symbol} ${t.side.toUpperCase()} | Entry: ${t.entry_price} | SL: ${t.stop_loss} | Result: ${d.r > 0 ? '+' : ''}${d.r.toFixed(2)}R | TF: ${t.timeframe || '—'} | Notes: ${t.notes || '—'} | Setup: ${t.setup || '—'}`
-      const candles = d.candleText ? `\nKERZEN (UTC):\n${d.candleText}` : '\n(Keine Kerzendaten — nur Screenshot und Notizen)'
-      return header + candles
-    }).join('\n\n---\n\n')
-
-    const prompt = `Du bist ein erfahrener Trading-Coach und Chart-Analyst.
-Analysiere diese ${withImages.length} Trade-Screenshots der Strategie "${activeStrategy.name}".
-${activeStrategy.description ? `\nBestehendes Regelwerk:\n${activeStrategy.description}\n` : ''}
-Zu jedem Screenshot folgen OHLC-Kerzendaten (UTC): 30 Kerzen vor Entry, gesamter Trade, 30 Kerzen nach Exit. ENTRY und EXIT sind markiert.
-
-${tradeBlocks}
-
-Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte auf Deutsch:
-
-**SETUP-KRITERIEN:**
-[Was muss auf dem Chart erkennbar sein?]
-
-**ENTRY-TRIGGER:**
-[Was löst den Einstieg konkret aus? Kerzenmuster, Level, Zeitpunkt]
-
-**STOP LOSS:**
-[Wo und wie wird der SL platziert?]
-
-**TAKE PROFIT:**
-[TP-Ziele und RR-Erwartung]
-
-**FILTER:**
-[Was schließt ein Setup aus? Session, Wochentag, Marktbedingungen]
-
-**VORGESCHLAGENE TAGS:**
 [Konkrete Tag-Namen, z.B. FVG_vorhanden, NYC_Open, Trend_klar]
 
-**VISUELLE MUSTER:**
-[Gemeinsame Chartstrukturen auf den Screenshots — was siehst du wiederholt?]`
+**MUSTER AUS DEN DATEN:**
+[Wiederkehrende Zahlen, Zeitpunkte, Kerzenmuster — was siehst du konsistent?]`
 
     try {
+      const content: any[] = hasImages
+        ? [
+            ...visionData.map(v => ({ type: 'image' as const, source: { type: 'url' as const, url: v.imageUrl } })),
+            { type: 'text' as const, text: prompt },
+          ]
+        : [{ type: 'text' as const, text: prompt }]
+
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
-          max_tokens: 2000,
-          messages: [{
-            role: 'user',
-            content: [
-              ...withImages.map(d => ({ type: 'image' as const, source: { type: 'url' as const, url: d.imageUrl! } })),
-              { type: 'text' as const, text: prompt },
-            ],
-          }],
+          max_tokens: 2500,
+          messages: [{ role: 'user', content }],
         }),
       })
       if (!res.ok) throw new Error(`API ${res.status}`)
       const data = await res.json()
-      setVisionAnalysis(data.content?.[0]?.text ?? 'Keine Antwort.')
+      setCombinedAnalysis(data.content?.[0]?.text ?? 'Keine Antwort.')
     } catch (e: any) {
-      setVisionError(e?.message ?? 'Fehler')
+      setCombinedError(e?.message ?? 'Fehler')
     } finally {
-      setVisionLoading(false)
+      setCombinedLoading(false)
     }
   }
 
@@ -583,6 +505,15 @@ Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte a
     if (!activeStrategy || !analysis) return
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
+
+    // Archive current ruleset before overwriting
+    if (activeStrategy.description) {
+      await supabase.from('strategy_ruleset_history').insert({
+        strategy_id: activeStrategy.id,
+        user_id: user.id,
+        description: activeStrategy.description,
+      })
+    }
 
     await supabase.from('strategy_profiles').update({ description: analysis }).eq('id', activeStrategy.id)
 
@@ -861,64 +792,45 @@ Identifiziere gemeinsame Muster und erstelle ein präzises Regelwerk. Antworte a
             </TouchableOpacity>
             {autoTagError && <Text style={s.kiError}>{autoTagError}</Text>}
 
-            {/* Text-Analyse: alle Trades, Kerzendaten, keine Bilder */}
-            <TouchableOpacity style={[s.kiBtn, { borderColor: '#22c55e33', marginTop: 10 }]} onPress={runTextKI} disabled={textLoading}>
-              {textLoading ? <ActivityIndicator size="small" color="#22c55e" /> : <Feather name="bar-chart-2" size={16} color="#22c55e" />}
-              <Text style={[s.kiBtnText, { color: '#22c55e' }]}>
-                {textLoading ? 'Analysiert Kerzendaten...' : `Kerzen-Analyse (alle ${trades.filter(t => t.strategy_id === activeStrategy!.id).length} Trades)`}
-              </Text>
-            </TouchableOpacity>
-            {textError && <Text style={s.kiError}>{textError}</Text>}
-            {textAnalysis && (
+            {/* Kombinierte Analyse: alle Trades (Kerzen) + beste/schlechteste 8 (Screenshots) */}
+            {(() => {
+              const totalTrades = trades.filter(t => t.strategy_id === activeStrategy!.id).length
+              const screenshotCount = trades.filter(t => t.strategy_id === activeStrategy!.id && t.screenshot_path).length
+              const label = combinedLoading
+                ? 'Analysiert...'
+                : combinedSaved
+                  ? `Analyse fertig ✓`
+                  : screenshotCount > 0
+                    ? `Regelwerk-Analyse (${totalTrades} Trades · ${Math.min(screenshotCount, 8)} Screenshots)`
+                    : `Regelwerk-Analyse (${totalTrades} Trades · keine Screenshots)`
+              return (
+                <TouchableOpacity style={[s.kiBtn, { borderColor: '#38bdf833', marginTop: 10 }]} onPress={runCombinedKI} disabled={combinedLoading}>
+                  {combinedLoading
+                    ? <ActivityIndicator size="small" color="#38bdf8" />
+                    : <Feather name="layers" size={16} color="#38bdf8" />}
+                  <Text style={[s.kiBtnText, { color: '#38bdf8' }]}>{label}</Text>
+                </TouchableOpacity>
+              )
+            })()}
+            {combinedError && <Text style={s.kiError}>{combinedError}</Text>}
+            {combinedAnalysis && (
               <View style={s.kiResult}>
-                <Text style={[s.kiHeading, { color: '#22c55e', marginBottom: 6 }]}>Kerzen-Analyse</Text>
-                {textAnalysis.split('\n').map((line, i) => {
+                <Text style={[s.kiHeading, { color: '#38bdf8', marginBottom: 6 }]}>Regelwerk-Analyse</Text>
+                {combinedAnalysis.split('\n').map((line, i) => {
                   const isBold = line.startsWith('**') && line.includes('**', 2)
                   if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
                   if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
                   return <Text key={i} style={s.kiText}>{line}</Text>
                 })}
                 <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
-                  <TouchableOpacity onPress={() => setTextAnalysis(null)} style={s.kiRerun}>
+                  <TouchableOpacity onPress={() => setCombinedAnalysis(null)} style={s.kiRerun}>
                     <Feather name="refresh-cw" size={12} color="#555" />
                     <Text style={s.kiRerunText}>Neu analysieren</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => saveAsRuleset(textAnalysis, () => setTextSaved(true))} style={s.kiRerun} disabled={textSaved}>
-                    <Feather name="save" size={12} color={textSaved ? '#22c55e' : '#f59e0b'} />
-                    <Text style={[s.kiRerunText, { color: textSaved ? '#22c55e' : '#f59e0b' }]}>
-                      {textSaved ? 'Gespeichert ✓' : 'Regelwerk + Tags speichern'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            {/* Vision-Analyse: beste 4 + schlechteste 4, mit Screenshots */}
-            <TouchableOpacity style={[s.kiBtn, { borderColor: '#f59e0b33', marginTop: 10 }]} onPress={runVisionKI} disabled={visionLoading}>
-              {visionLoading ? <ActivityIndicator size="small" color="#f59e0b" /> : <Feather name="camera" size={16} color="#f59e0b" />}
-              <Text style={[s.kiBtnText, { color: '#f59e0b' }]}>
-                {visionLoading ? 'Analysiert Screenshots...' : `Vision-Analyse (beste 4 + schlechteste 4 von ${trades.filter(t => t.strategy_id === activeStrategy!.id && t.screenshot_path).length} Screenshots)`}
-              </Text>
-            </TouchableOpacity>
-            {visionError && <Text style={s.kiError}>{visionError}</Text>}
-            {visionAnalysis && (
-              <View style={s.kiResult}>
-                <Text style={[s.kiHeading, { color: '#f59e0b', marginBottom: 6 }]}>Vision-Analyse</Text>
-                {visionAnalysis.split('\n').map((line, i) => {
-                  const isBold = line.startsWith('**') && line.includes('**', 2)
-                  if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
-                  if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
-                  return <Text key={i} style={s.kiText}>{line}</Text>
-                })}
-                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
-                  <TouchableOpacity onPress={() => setVisionAnalysis(null)} style={s.kiRerun}>
-                    <Feather name="refresh-cw" size={12} color="#555" />
-                    <Text style={s.kiRerunText}>Neu analysieren</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => saveAsRuleset(visionAnalysis, () => setVisionSaved(true))} style={s.kiRerun} disabled={visionSaved}>
-                    <Feather name="save" size={12} color={visionSaved ? '#22c55e' : '#f59e0b'} />
-                    <Text style={[s.kiRerunText, { color: visionSaved ? '#22c55e' : '#f59e0b' }]}>
-                      {visionSaved ? 'Gespeichert ✓' : 'Regelwerk + Tags speichern'}
+                  <TouchableOpacity onPress={() => saveAsRuleset(combinedAnalysis, () => setCombinedSaved(true))} style={s.kiRerun} disabled={combinedSaved}>
+                    <Feather name="save" size={12} color={combinedSaved ? '#22c55e' : '#f59e0b'} />
+                    <Text style={[s.kiRerunText, { color: combinedSaved ? '#22c55e' : '#f59e0b' }]}>
+                      {combinedSaved ? 'Gespeichert ✓' : 'Regelwerk + Tags speichern'}
                     </Text>
                   </TouchableOpacity>
                 </View>
