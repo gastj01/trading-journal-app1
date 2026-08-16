@@ -36,6 +36,7 @@ export default function TradeDetailScreen() {
   const [kiLoading, setKiLoading] = useState(false)
   const [kiError, setKiError] = useState<string | null>(null)
   const [kiSaved, setKiSaved] = useState(false)
+  const [kiFullCandles, setKiFullCandles] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -107,7 +108,7 @@ export default function TradeDetailScreen() {
       const entryMs = new Date(trade.opened_at).getTime()
       const exitMs = trade.closed_at ? new Date(trade.closed_at).getTime() : 0
       const all = ohlcv.candles
-      const PRE = 30, MAX_BODY = 90, POST = 30
+      const PRE = 30, MAX_BODY = kiFullCandles ? Infinity : 90, POST = 30
 
       const entryIdx = all.findIndex(c => c.openTime >= entryMs)
       const exitIdx = exitMs ? all.findIndex(c => c.openTime >= exitMs) : all.length - 1
@@ -409,6 +410,15 @@ VORHANDENE TAGS: ${tagList}
               {kiLoading ? 'KI analysiert...' : kiSaved ? 'KI Review aktualisieren' : 'KI Review & Auto-Tag'}
             </Text>
             {kiSaved && <Feather name="check" size={14} color="#22c55e" />}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, paddingHorizontal: 2 }}
+            onPress={() => setKiFullCandles(v => !v)}
+          >
+            <Feather name={kiFullCandles ? 'toggle-right' : 'toggle-left'} size={22} color={kiFullCandles ? '#818cf8' : '#444'} />
+            <Text style={{ color: kiFullCandles ? '#818cf8' : '#555', fontSize: 12 }}>
+              {kiFullCandles ? 'Alle Kerzen (kann bei langen Trades fehlschlagen)' : 'Kompakt — max. 150 Kerzen'}
+            </Text>
           </TouchableOpacity>
           {kiError ? <Text style={{ color: '#ef4444', fontSize: 12, marginTop: 6 }}>{kiError}</Text> : null}
         </View>
