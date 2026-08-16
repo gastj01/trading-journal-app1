@@ -657,7 +657,7 @@ Bewerte auf Deutsch:
                 ? <ActivityIndicator size="small" color="#7c3aed" />
                 : <Feather name="cpu" size={16} color="#7c3aed" />}
               <Text style={[s.screenshotText, { color: '#7c3aed' }]}>
-                {kiPlanLoading ? 'KI bewertet...' : screenshotPath ? 'Trade-Plan bewerten (mit Screenshot)' : 'Trade-Plan bewerten'}
+                {kiPlanLoading ? 'KI bewertet...' : screenshotPaths.length > 0 ? 'Trade-Plan bewerten (mit Screenshot)' : 'Trade-Plan bewerten'}
               </Text>
             </TouchableOpacity>
             {kiPlanError && <Text style={{ color: '#ef4444', fontSize: 13, marginTop: 4 }}>{kiPlanError}</Text>}
