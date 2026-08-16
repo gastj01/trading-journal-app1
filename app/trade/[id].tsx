@@ -101,18 +101,40 @@ export default function TradeDetailScreen() {
     const r = trade.exit_price != null ? calcWeightedR(trade, events) : null
     const tagList = allTagDefs.map(t => `${t.tag_type}: ${t.name}`).join(', ') || 'Keine Tags vorhanden'
 
-    // Format candles from already-loaded ohlcv, or fetch fresh with buffer
+    // Format candles — cap at 150 total (30 pre + 90 body + 30 post), subsample if needed
     let candleText = ''
     if (ohlcv && ohlcv.candles.length > 0) {
       const entryMs = new Date(trade.opened_at).getTime()
       const exitMs = trade.closed_at ? new Date(trade.closed_at).getTime() : 0
-      const rows = ohlcv.candles.map(c => {
+      const all = ohlcv.candles
+      const PRE = 30, MAX_BODY = 90, POST = 30
+
+      const entryIdx = all.findIndex(c => c.openTime >= entryMs)
+      const exitIdx = exitMs ? all.findIndex(c => c.openTime >= exitMs) : all.length - 1
+      const safeEntry = entryIdx < 0 ? 0 : entryIdx
+      const safeExit = exitIdx < 0 ? all.length - 1 : exitIdx
+
+      const preSlice = all.slice(0, safeEntry).slice(-PRE)
+      const body = all.slice(safeEntry, safeExit + 1)
+      const postSlice = all.slice(safeExit + 1).slice(0, POST)
+
+      let sampledBody = body
+      if (body.length > MAX_BODY) {
+        const step = body.length / MAX_BODY
+        sampledBody = Array.from({ length: MAX_BODY }, (_, i) => body[Math.round(i * step)]).filter(Boolean)
+      }
+
+      const display = [...preSlice, ...sampledBody, ...postSlice]
+      const entryD = preSlice.length
+      const exitD = preSlice.length + sampledBody.length - 1
+
+      const rows = display.map((c, i) => {
         const dt = new Date(c.openTime)
         const ts = `${dt.getUTCMonth() + 1}/${dt.getUTCDate()} ${String(dt.getUTCHours()).padStart(2, '0')}:${String(dt.getUTCMinutes()).padStart(2, '0')}`
-        const mark = c.openTime >= entryMs && c.openTime < entryMs + 1000 ? ' ← ENTRY'
-          : exitMs && c.openTime >= exitMs && c.openTime < exitMs + 1000 ? ' ← EXIT' : ''
+        const mark = i === entryD ? ' ← ENTRY' : i === exitD ? ' ← EXIT' : ''
         return `${ts} O:${c.open} H:${c.high} L:${c.low} C:${c.close}${mark}`
       })
+      if (body.length > MAX_BODY) rows.splice(entryD + 1, 0, `... (${body.length - MAX_BODY} ausgedünnt)`)
       candleText = `\nKERZEN (UTC):\n${rows.join('\n')}`
     }
 
