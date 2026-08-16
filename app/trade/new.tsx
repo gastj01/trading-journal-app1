@@ -30,7 +30,7 @@ export default function NewTradeScreen() {
   const [rulesExpanded, setRulesExpanded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [showCandlePicker, setShowCandlePicker] = useState(false)
-  const [screenshotPath, setScreenshotPath] = useState('')
+  const [screenshotPaths, setScreenshotPaths] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
   const [kiPlanLoading, setKiPlanLoading] = useState(false)
   const [kiPlanResult, setKiPlanResult] = useState<string | null>(null)
@@ -175,7 +175,7 @@ export default function NewTradeScreen() {
       if (uploadResult.status >= 300) {
         Alert.alert('Upload-Fehler', `HTTP ${uploadResult.status}`)
       } else {
-        setScreenshotPath(path)
+        setScreenshotPaths(prev => [...prev, path].slice(0, 2))
         setKiPlanResult(null)
       }
     } catch (e: any) {
@@ -213,18 +213,20 @@ export default function NewTradeScreen() {
       }
     } catch { /* ignore — still useful without candles */ }
 
-    // Screenshot URL
-    let imageUrl: string | null = null
-    if (screenshotPath) {
+    // Screenshot URLs (up to 2)
+    const imageUrls: string[] = []
+    for (const path of screenshotPaths) {
+      let url: string | null = null
       try {
         const { data: compressed } = await supabase.storage.from('trade-screenshots')
-          .createSignedUrl(screenshotPath, 3600, { transform: { width: 800, quality: 70 } })
-        imageUrl = compressed?.signedUrl ?? null
+          .createSignedUrl(path, 3600, { transform: { width: 800, quality: 70 } })
+        url = compressed?.signedUrl ?? null
       } catch { /* ignore */ }
-      if (!imageUrl) {
-        const { data: orig } = await supabase.storage.from('trade-screenshots').createSignedUrl(screenshotPath, 3600)
-        imageUrl = orig?.signedUrl ?? null
+      if (!url) {
+        const { data: orig } = await supabase.storage.from('trade-screenshots').createSignedUrl(path, 3600)
+        url = orig?.signedUrl ?? null
       }
+      if (url) imageUrls.push(url)
     }
 
     const prompt = `Du bist ein erfahrener Trading-Coach. Bewerte diesen geplanten Trade gegen das Strategie-Regelwerk.
@@ -235,9 +237,10 @@ ${selectedStrategy.description}
 GEPLANTER TRADE:
 Symbol: ${form.symbol} | ${form.side.toUpperCase()} | TF: ${form.timeframe}
 Entry: ${form.entry_price || '—'} | SL: ${form.stop_loss || '—'}
-${form.entry_price && form.stop_loss ? `RR bis SL: 1:1 (SL-Abstand: ${Math.abs(parseFloat(form.entry_price) - parseFloat(form.stop_loss)).toFixed(4)})` : ''}
+${form.entry_price && form.stop_loss ? `SL-Abstand: ${Math.abs(parseFloat(form.entry_price) - parseFloat(form.stop_loss)).toFixed(4)}` : ''}
 Setup: ${form.setup || '—'}
 Plan/Notizen: ${form.notes || '—'}
+${imageUrls.length > 0 ? `\n${imageUrls.length} Screenshot(s) beigefügt.` : ''}
 ${candleText ? `\nKERZEN VOR ENTRY (UTC):\n${candleText}` : ''}
 
 Bewerte auf Deutsch:
@@ -255,14 +258,15 @@ Bewerte auf Deutsch:
 [Kurze Begründung]`
 
     try {
-      const content: any[] = imageUrl
-        ? [{ type: 'image', source: { type: 'url', url: imageUrl } }, { type: 'text', text: prompt }]
-        : [{ type: 'text', text: prompt }]
+      const content: any[] = [
+        ...imageUrls.map(url => ({ type: 'image' as const, source: { type: 'url' as const, url } })),
+        { type: 'text' as const, text: prompt },
+      ]
 
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1000, messages: [{ role: 'user', content }] }),
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1200, messages: [{ role: 'user', content }] }),
       })
       if (!res.ok) throw new Error(`API ${res.status}`)
       const data = await res.json()
@@ -334,7 +338,7 @@ Bewerte auf Deutsch:
       setup: form.setup,
       notes: form.notes,
       trade_data_quality: form.trade_data_quality,
-      screenshot_path: screenshotPath || null,
+      screenshot_path: screenshotPaths[0] ?? null,
       opened_at: openedAt,
     }).select().single()
 
@@ -619,20 +623,28 @@ Bewerte auf Deutsch:
         <Label text="Notizen" />
         <Input value={form.notes} onChangeText={v => update('notes', v)} multiline numberOfLines={3} />
 
-        <Label text="Screenshot" />
-        <TouchableOpacity style={s.screenshotBtn} onPress={handlePickScreenshot} disabled={uploading}>
-          {uploading
-            ? <ActivityIndicator size="small" color="#666" />
-            : <Feather name={screenshotPath ? 'check-circle' : 'upload'} size={16} color={screenshotPath ? '#22c55e' : '#666'} />}
-          <Text style={[s.screenshotText, screenshotPath ? s.screenshotTextDone : null]}>
-            {uploading ? 'Lädt hoch...' : screenshotPath ? 'Screenshot hochgeladen ✓' : 'Screenshot hochladen (optional)'}
-          </Text>
-        </TouchableOpacity>
-        {screenshotPath ? (
-          <TouchableOpacity onPress={() => { setScreenshotPath(''); setKiPlanResult(null) }} style={{ paddingVertical: 4 }}>
-            <Text style={{ color: '#ef4444', fontSize: 12 }}>Entfernen</Text>
+        <Label text={`Screenshots (${screenshotPaths.length}/2)`} />
+        {screenshotPaths.map((_, i) => (
+          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <View style={[s.screenshotBtn, { flex: 1, borderColor: '#22c55e44' }]}>
+              <Feather name="check-circle" size={16} color="#22c55e" />
+              <Text style={s.screenshotTextDone}>Screenshot {i + 1} ✓</Text>
+            </View>
+            <TouchableOpacity onPress={() => { setScreenshotPaths(prev => prev.filter((_, j) => j !== i)); setKiPlanResult(null) }} style={{ padding: 8 }}>
+              <Feather name="x" size={16} color="#ef4444" />
+            </TouchableOpacity>
+          </View>
+        ))}
+        {screenshotPaths.length < 2 && (
+          <TouchableOpacity style={s.screenshotBtn} onPress={handlePickScreenshot} disabled={uploading}>
+            {uploading
+              ? <ActivityIndicator size="small" color="#666" />
+              : <Feather name="upload" size={16} color="#666" />}
+            <Text style={s.screenshotText}>
+              {uploading ? 'Lädt hoch...' : screenshotPaths.length === 0 ? 'Screenshot hochladen (optional)' : '2. Screenshot hinzufügen'}
+            </Text>
           </TouchableOpacity>
-        ) : null}
+        )}
 
         {selectedStrategy?.description && (
           <>
@@ -650,7 +662,7 @@ Bewerte auf Deutsch:
             </TouchableOpacity>
             {kiPlanError && <Text style={{ color: '#ef4444', fontSize: 13, marginTop: 4 }}>{kiPlanError}</Text>}
             {kiPlanResult && (
-              <View style={s.kiResultBox}>
+              <ScrollView style={s.kiResultBox} nestedScrollEnabled>
                 {kiPlanResult.split('\n').map((line, i) => {
                   const isBold = line.startsWith('**') && line.includes('**', 2)
                   if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
@@ -661,7 +673,7 @@ Bewerte auf Deutsch:
                   <Feather name="refresh-cw" size={12} color="#555" />
                   <Text style={{ color: '#555', fontSize: 12 }}>Neu bewerten</Text>
                 </TouchableOpacity>
-              </View>
+              </ScrollView>
             )}
           </>
         )}
@@ -785,7 +797,7 @@ const s = StyleSheet.create({
   screenshotBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, borderWidth: 1, borderColor: '#2a2a2a', marginTop: 4 },
   screenshotText: { color: '#666', fontSize: 14 },
   screenshotTextDone: { color: '#22c55e' },
-  kiResultBox: { backgroundColor: '#111', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#1e1e1e' },
+  kiResultBox: { backgroundColor: '#111', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#1e1e1e', maxHeight: 450 },
   kiHeading: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 10, marginBottom: 2 },
   kiText: { color: '#bbb', fontSize: 13, lineHeight: 20 },
 })
