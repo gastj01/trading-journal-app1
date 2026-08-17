@@ -62,7 +62,8 @@ class MainActivity : ReactActivity() {
     (window.decorView as ViewGroup).addView(tv, params)
     val lp = tv.layoutParams
     if (lp is android.widget.FrameLayout.LayoutParams) {
-      lp.gravity = Gravity.TOP or Gravity.START
+      lp.gravity = Gravity.CENTER_HORIZONTAL or Gravity.TOP
+      lp.topMargin = (resources.displayMetrics.heightPixels * 0.32).toInt()
       tv.layoutParams = lp
     }
     diagView = tv

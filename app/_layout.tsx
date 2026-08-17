@@ -46,10 +46,12 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
-      <View style={{ position: 'absolute', top: 0, right: 0, zIndex: 9999, backgroundColor: '#000000cc', padding: 4 }} pointerEvents="none">
-        <Text style={{ color: '#0f0', fontSize: 9 }}>
-          {`win ${dims.window.width}x${dims.window.height}\nscr ${dims.screen.width}x${dims.screen.height}\nlayout ${layout.w}x${layout.h} measY ${measY}\ntap pageY ${touch.pageY} locY ${touch.locationY}`}
-        </Text>
+      <View style={{ position: 'absolute', top: '42%', left: 0, right: 0, zIndex: 9999, alignItems: 'center' }} pointerEvents="none">
+        <View style={{ backgroundColor: '#000000cc', padding: 4 }}>
+          <Text style={{ color: '#0f0', fontSize: 9, textAlign: 'center' }}>
+            {`win ${dims.window.width}x${dims.window.height}\nscr ${dims.screen.width}x${dims.screen.height}\nlayout ${layout.w}x${layout.h} measY ${measY}\ntap pageY ${touch.pageY} locY ${touch.locationY}`}
+          </Text>
+        </View>
       </View>
     </View>
   )
