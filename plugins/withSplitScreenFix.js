@@ -35,7 +35,7 @@ function withTouchDiagOverlay(config) {
     if (!src.includes('import android.view.MotionEvent')) {
       src = src.replace(
         'import android.os.Bundle',
-        'import android.os.Bundle\nimport android.view.MotionEvent\nimport android.view.ViewGroup\nimport android.widget.TextView\nimport android.view.Gravity\nimport android.graphics.Color'
+        'import android.os.Bundle\nimport android.content.res.Configuration\nimport android.view.MotionEvent\nimport android.view.ViewGroup\nimport android.widget.TextView\nimport android.view.Gravity\nimport android.graphics.Color'
       )
     }
 
@@ -44,6 +44,7 @@ function withTouchDiagOverlay(config) {
         'class MainActivity : ReactActivity() {',
         `object DiagState {
   var createCount = 0
+  var configChangedCount = 0
 }
 
 class MainActivity : ReactActivity() {
@@ -72,9 +73,20 @@ class MainActivity : ReactActivity() {
       ensureDiagOverlay()
       val loc = IntArray(2)
       window.decorView.getLocationOnScreen(loc)
-      diagView?.text = "native y=%.0f rawY=%.0f winY=%d creates=%d".format(ev.y, ev.rawY, loc[1], DiagState.createCount)
+      val content = window.findViewById<ViewGroup>(android.R.id.content)
+      diagView?.text = "native y=%.0f rawY=%.0f winY=%d creates=%d\ndecor %dx%d content %dx%d confCh=%d".format(
+        ev.y, ev.rawY, loc[1], DiagState.createCount,
+        window.decorView.width, window.decorView.height,
+        content?.width ?: -1, content?.height ?: -1,
+        DiagState.configChangedCount
+      )
     }
     return super.dispatchTouchEvent(ev)
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    DiagState.configChangedCount++
   }
 `
       )
