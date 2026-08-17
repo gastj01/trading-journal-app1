@@ -56,10 +56,16 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
-      <View style={{ position: 'absolute', top: 4, left: 0, right: 0, zIndex: 9999, alignItems: 'center' }} pointerEvents="none">
-        <View style={{ backgroundColor: '#000000cc', padding: 4, maxWidth: '92%' }}>
-          <Text style={{ color: '#0f0', fontSize: 9, textAlign: 'center' }}>
-            {`px/dp ${PixelRatio.get()} win ${Math.round(dims.window.width)}x${Math.round(dims.window.height)} scr ${Math.round(dims.screen.width)}x${Math.round(dims.screen.height)}\nlayout ${layout.w}x${layout.h} measY ${measY}\nplusRect x${r.x} y${r.y} w${r.width} h${r.height}\ntouchStart ${diag.touchStartCount} pressCount ${diag.pressCount}`}
+      <View style={{ position: 'absolute', top: 4, left: 4, zIndex: 9999, elevation: 999 }} pointerEvents="none">
+        <View style={{ backgroundColor: '#000000cc', padding: 4, alignSelf: 'flex-start' }}>
+          <Text style={{ color: '#0f0', fontSize: 10, includeFontPadding: false }}>
+            {[
+              `dp:${PixelRatio.get()} win:${Math.round(dims.window.width)}x${Math.round(dims.window.height)}`,
+              `scr:${Math.round(dims.screen.width)}x${Math.round(dims.screen.height)} layout:${layout.w}x${layout.h}`,
+              `measY:${measY}`,
+              `rect x${r.x} y${r.y} w${r.width} h${r.height}`,
+              `touchStart:${diag.touchStartCount} press:${diag.pressCount}`,
+            ].join('\n')}
           </Text>
         </View>
       </View>
