@@ -134,11 +134,18 @@ export default function RootLayout() {
     }
   }, [session, loading, segments])
 
-  // GestureHandlerRootView restored - swapping it for a plain View (previous
-  // diag round) didn't fix the bug, and testing further diag builds without it
-  // means testing a tree two mutations away from the real app.
+  // TEMP: swapped GestureHandlerRootView for a plain View again — different
+  // question than the earlier e94a6f4/0a17db9 test (which asked "does removing
+  // RNGH fix the bug" — it didn't). This time: cap/ts stayed at 0 even on a
+  // confirmed-successful fullscreen finger tap (2026-08-17), so either RNGH
+  // swallows onStartShouldSetResponderCapture/onTouchStart before they ever
+  // reach the button, or those two probes are dead for some other reason. If
+  // cap/ts start firing with RNGH removed, that confirms RNGH as the reason
+  // they're blind (independent of whether RNGH causes the split-screen bug
+  // itself, which is already ruled out). Revert to GestureHandlerRootView
+  // once this specific question is answered.
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <View style={{ flex: 1 }}>
       <SplitScreenDiag>
         <SafeAreaProvider>
           <ErrorBoundary>
@@ -156,6 +163,6 @@ export default function RootLayout() {
           </ErrorBoundary>
         </SafeAreaProvider>
       </SplitScreenDiag>
-    </GestureHandlerRootView>
+    </View>
   )
 }
