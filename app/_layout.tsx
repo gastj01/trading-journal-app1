@@ -123,9 +123,9 @@ export default function RootLayout() {
     }
   }, [session, loading, segments])
 
+  // TEMP diag: swapped GestureHandlerRootView for plain View to test whether
+  // RNGH's native touch interception is the cause of the split-screen bug
   return (
-    {/* TEMP diag: swapped GestureHandlerRootView for plain View to test whether
-        RNGH's native touch interception is the cause of the split-screen bug */}
     <View style={{ flex: 1 }}>
       <SplitScreenDiag>
         <SafeAreaProvider>
