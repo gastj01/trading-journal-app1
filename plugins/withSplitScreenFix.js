@@ -81,7 +81,9 @@ class MainActivity : ReactActivity() {
         MotionEvent.ACTION_UP -> "UP"
         else -> "CANCEL"
       }
-      val line = "%s x=%.0f y=%.0f focus=%b consumed=%b".format(actionName, ev.x, ev.y, hasWindowFocus(), consumed)
+      val line = "%s x=%.0f y=%.0f rawX=%.0f dev=%d tool=%d focus=%b consumed=%b".format(
+        actionName, ev.x, ev.y, ev.rawX, ev.deviceId, ev.getToolType(0), hasWindowFocus(), consumed
+      )
       if (action == MotionEvent.ACTION_DOWN) {
         val loc = IntArray(2)
         window.decorView.getLocationOnScreen(loc)
