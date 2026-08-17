@@ -42,27 +42,30 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
   }, [])
 
   const r = diag.plusButtonRect
-  // Short, single-value-per-line strings only — a combined line (e.g. dp+win+scr)
-  // previously wrapped inside the narrow split-screen column and got the
-  // wrapped-in last line clipped (confirmed 2026-08-17, twice, same failure
-  // mode a prior fix already solved once by using short lines — don't
-  // reintroduce long concatenated lines here).
+  // Short, single-value-per-line strings only, most important first — a
+  // combined line (e.g. dp+win+scr) previously wrapped inside the narrow
+  // split-screen column and clipped whatever came after it (confirmed
+  // 2026-08-17, twice). Explicit width/height on the box removes the
+  // dependency on content-driven sizing, since Android's default
+  // clipChildren is the suspected culprit, not z-order (elevation alone
+  // didn't fix it before). cap/ts/press first so a clip eats dp/win/scr/rect
+  // (already-understood values) instead of the counters we actually need.
   const lines = [
-    `dp${PixelRatio.get().toFixed(2)}`,
-    `win${Math.round(dims.window.width)}x${Math.round(dims.window.height)}`,
-    `scr${Math.round(dims.screen.width)}x${Math.round(dims.screen.height)}`,
-    `rect${r.x},${r.y} ${r.width}x${r.height}`,
     `cap${diag.plusResponderCaptureCount} ${age(diag.lastPlusResponderCaptureAt, diag.now)}`,
     `ts${diag.plusTouchStartCount} ${age(diag.lastPlusTouchStartAt, diag.now)}`,
     `press${diag.plusPressCount} ${age(diag.lastPlusPressAt, diag.now)}`,
+    `rect${r.x},${r.y} ${r.width}x${r.height}`,
+    `dp${PixelRatio.get().toFixed(2)}`,
+    `win${Math.round(dims.window.width)}x${Math.round(dims.window.height)}`,
+    `scr${Math.round(dims.screen.width)}x${Math.round(dims.screen.height)}`,
   ]
   return (
     <View style={{ flex: 1 }}>
       {children}
       <View style={{ position: 'absolute', top: 4, left: 4, zIndex: 9999, elevation: 999 }} pointerEvents="none">
-        <View style={{ backgroundColor: '#000', padding: 4, alignSelf: 'flex-start' }}>
+        <View style={{ backgroundColor: '#000', padding: 4, width: 150, height: 130 }}>
           {lines.map((line, i) => (
-            <Text key={i} style={{ color: '#0f0', fontSize: 11, includeFontPadding: false }} numberOfLines={1}>
+            <Text key={i} style={{ color: '#0f0', fontSize: 10, includeFontPadding: false }} numberOfLines={1}>
               {line}
             </Text>
           ))}
