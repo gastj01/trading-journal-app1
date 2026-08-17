@@ -42,18 +42,30 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
   }, [])
 
   const r = diag.plusButtonRect
+  // Short, single-value-per-line strings only — a combined line (e.g. dp+win+scr)
+  // previously wrapped inside the narrow split-screen column and got the
+  // wrapped-in last line clipped (confirmed 2026-08-17, twice, same failure
+  // mode a prior fix already solved once by using short lines — don't
+  // reintroduce long concatenated lines here).
+  const lines = [
+    `dp${PixelRatio.get().toFixed(2)}`,
+    `win${Math.round(dims.window.width)}x${Math.round(dims.window.height)}`,
+    `scr${Math.round(dims.screen.width)}x${Math.round(dims.screen.height)}`,
+    `rect${r.x},${r.y} ${r.width}x${r.height}`,
+    `cap${diag.plusResponderCaptureCount} ${age(diag.lastPlusResponderCaptureAt, diag.now)}`,
+    `ts${diag.plusTouchStartCount} ${age(diag.lastPlusTouchStartAt, diag.now)}`,
+    `press${diag.plusPressCount} ${age(diag.lastPlusPressAt, diag.now)}`,
+  ]
   return (
     <View style={{ flex: 1 }}>
       {children}
       <View style={{ position: 'absolute', top: 4, left: 4, zIndex: 9999, elevation: 999 }} pointerEvents="none">
-        <View style={{ backgroundColor: '#000000cc', padding: 4, alignSelf: 'flex-start' }}>
-          <Text style={{ color: '#0f0', fontSize: 10, includeFontPadding: false }}>
-            {[
-              `dp${PixelRatio.get()} win${Math.round(dims.window.width)}x${Math.round(dims.window.height)} scr${Math.round(dims.screen.width)}x${Math.round(dims.screen.height)}`,
-              `rect x${r.x} y${r.y} w${r.width} h${r.height}`,
-              `cap:${diag.plusResponderCaptureCount}(${age(diag.lastPlusResponderCaptureAt, diag.now)}) ts:${diag.plusTouchStartCount}(${age(diag.lastPlusTouchStartAt, diag.now)}) press:${diag.plusPressCount}(${age(diag.lastPlusPressAt, diag.now)})`,
-            ].join('\n')}
-          </Text>
+        <View style={{ backgroundColor: '#000', padding: 4, alignSelf: 'flex-start' }}>
+          {lines.map((line, i) => (
+            <Text key={i} style={{ color: '#0f0', fontSize: 11, includeFontPadding: false }} numberOfLines={1}>
+              {line}
+            </Text>
+          ))}
         </View>
       </View>
     </View>
