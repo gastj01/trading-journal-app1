@@ -90,6 +90,23 @@ export default function RootLayout() {
   const [loading, setLoading] = useState(true)
   const router = useRouter()
   const segments = useSegments()
+
+  // Forces GestureHandlerRootView's native touch-intercepting view to be
+  // recreated on window resize (split-screen enter/exit, Fold/unfold).
+  // Its native bounds otherwise go stale after a resize when the Activity
+  // itself is no longer recreated (see plugins/withSplitScreenFix.js), which
+  // was observed as taps landing but never reaching RN's JS responder system.
+  const [winKey, setWinKey] = useState(() => {
+    const { width, height } = Dimensions.get('window')
+    return `${Math.round(width)}x${Math.round(height)}`
+  })
+  useEffect(() => {
+    const sub = Dimensions.addEventListener('change', ({ window }) => {
+      setWinKey(`${Math.round(window.width)}x${Math.round(window.height)}`)
+    })
+    return () => sub.remove()
+  }, [])
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
@@ -114,7 +131,7 @@ export default function RootLayout() {
   }, [session, loading, segments])
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView key={winKey} style={{ flex: 1 }}>
       <SplitScreenDiag>
         <SafeAreaProvider>
           <ErrorBoundary>
