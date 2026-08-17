@@ -68,17 +68,6 @@ class MainActivity : ReactActivity() {
       lp.topMargin = (resources.displayMetrics.heightPixels * 0.32).toInt()
       tv.layoutParams = lp
     }
-    // TEMP diag test: user reports a text-cursor (I-beam) on mouse hover
-    // across the whole upper window area, on every tab - not just over the
-    // "+" button. That pattern (persists across all RN screens, fixed
-    // window position) points at THIS view, not at any one button: it's a
-    // TextView added directly to decorView, outside the RN tree, so it's
-    // present identically on every tab. GONE removes it from layout, hit-
-    // testing and hover pointer-icon resolution entirely, while leaving
-    // dispatchTouchEvent/gestureLog logic untouched (diagView?.text keeps
-    // being set, just invisible) - tests whether this overlay itself has
-    // been the thing eating touches, without losing the native log.
-    tv.visibility = View.GONE
     diagView = tv
   }
 

@@ -12,7 +12,8 @@ export default function DashboardScreen() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [account, setAccount] = useState<TradingAccount | null>(null)
   const [refreshing, setRefreshing] = useState(false)
-  const addBtnRef = useRef<TouchableOpacity>(null)
+  const [addBtnPressed, setAddBtnPressed] = useState(false)
+  const addBtnRef = useRef<View>(null)
 
   function measureAddBtn() {
     addBtnRef.current?.measureInWindow((x, y, width, height) => {
@@ -72,15 +73,20 @@ export default function DashboardScreen() {
             <Text style={s.accountName}>{account?.name ?? 'Trading Journal'}</Text>
             <Text style={s.subtitle}>{account?.platform ?? ''}</Text>
           </View>
-          {/* TEMP diag: cap/ts moved off the TouchableOpacity onto this plain
-              View wrapper. Pressability (which TouchableOpacity uses) owns
-              the classic onResponder-family/capture callbacks and was
-              silently shadowing them when they sat directly on the TouchableOpacity —
-              that's the likely reason cap/ts read 0 even on confirmed
-              successful taps. onStartShouldSetResponderCapture returns false
-              so the wrapper only observes, it doesn't steal the touch (a
-              wrapper claiming the responder was already ruled out once as a
-              cause, see SplitScreenDiag history). */}
+          {/* Split-screen touch bug workaround: this button no longer uses
+              TouchableOpacity. Diagnosed (2026-08-18) with matched full-
+              screen vs. split taps on the same build: the classic responder
+              path (onStartShouldSetResponderCapture/onTouchStart on a plain
+              View, kept below as an observer) fires identically in both
+              modes, but TouchableOpacity's Pressability-based onPress only
+              fires full-screen - in split it silently never resolves the
+              press, even though native dispatch is clean and the touch
+              lands inside the button's bounds. Fix: claim the responder
+              directly on a plain View and act on onResponderRelease, which
+              bypasses Pressability entirely. onResponderTerminationRequest
+              returns false so the parent ScrollView can't steal the
+              gesture mid-press. Visual press feedback is manual (opacity)
+              since TouchableOpacity isn't in the tree anymore. */}
           <View
             onStartShouldSetResponderCapture={() => {
               tapDiag.plusResponderCaptureCount++
@@ -94,18 +100,23 @@ export default function DashboardScreen() {
               measureAddBtn()
             }}
           >
-            <TouchableOpacity
+            <View
               ref={addBtnRef}
-              style={s.addBtn}
               onLayout={measureAddBtn}
-              onPress={() => {
+              style={[s.addBtn, addBtnPressed && s.addBtnPressed]}
+              onStartShouldSetResponder={() => true}
+              onResponderTerminationRequest={() => false}
+              onResponderGrant={() => setAddBtnPressed(true)}
+              onResponderRelease={() => {
+                setAddBtnPressed(false)
                 tapDiag.plusPressCount++
                 tapDiag.lastPlusPressAt = Date.now()
                 router.push('/trade/new')
               }}
+              onResponderTerminate={() => setAddBtnPressed(false)}
             >
               <Feather name="plus" size={20} color="#000" />
-            </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -184,6 +195,7 @@ const s = StyleSheet.create({
   accountName: { color: '#fff', fontSize: 20, fontWeight: '700' },
   subtitle: { color: '#666', fontSize: 13, marginTop: 2 },
   addBtn: { backgroundColor: '#22c55e', borderRadius: 20, padding: 8 },
+  addBtnPressed: { opacity: 0.6 },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, gap: 8, marginBottom: 8 },
   card: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 14, width: '48%', flex: 1, minWidth: '45%' },
   cardLabel: { color: '#888', fontSize: 12, marginBottom: 4 },
