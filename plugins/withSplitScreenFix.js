@@ -35,7 +35,7 @@ function withTouchDiagOverlay(config) {
     if (!src.includes('import android.view.MotionEvent')) {
       src = src.replace(
         'import android.os.Bundle',
-        'import android.os.Bundle\nimport android.content.res.Configuration\nimport android.view.MotionEvent\nimport android.view.ViewGroup\nimport android.widget.TextView\nimport android.view.Gravity\nimport android.graphics.Color'
+        'import android.os.Bundle\nimport android.content.res.Configuration\nimport android.view.MotionEvent\nimport android.view.View\nimport android.view.ViewGroup\nimport android.widget.TextView\nimport android.view.Gravity\nimport android.graphics.Color'
       )
     }
 
@@ -71,10 +71,40 @@ class MainActivity : ReactActivity() {
     diagView = tv
   }
 
+  // Walks the real view hierarchy to find the leaf view that actually
+  // resolves at the touch point, independent of what dispatchTouchEvent's
+  // return value claims. consumed=true only proves *something* in the
+  // hierarchy took it, not that the React root did - this answers whether
+  // the touch even reaches a React view, or something else catches it first.
+  private fun findHitView(view: View, rawX: Float, rawY: Float): View {
+    if (view is ViewGroup) {
+      for (i in view.childCount - 1 downTo 0) {
+        val child = view.getChildAt(i)
+        if (child.visibility != View.VISIBLE) continue
+        val loc = IntArray(2)
+        child.getLocationOnScreen(loc)
+        if (rawX >= loc[0] && rawX < loc[0] + child.width && rawY >= loc[1] && rawY < loc[1] + child.height) {
+          return findHitView(child, rawX, rawY)
+        }
+      }
+    }
+    return view
+  }
+
+  private fun describeHitView(view: View): String {
+    val idPart = try {
+      if (view.id != View.NO_ID) resources.getResourceEntryName(view.id) else "noid"
+    } catch (e: Exception) {
+      "noid"
+    }
+    return "%s#%s".format(view.javaClass.simpleName, idPart)
+  }
+
   override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
     val action = ev?.actionMasked
     if (ev != null && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)) {
       ensureDiagOverlay()
+      val hitDesc = if (action == MotionEvent.ACTION_DOWN) describeHitView(findHitView(window.decorView, ev.rawX, ev.rawY)) else ""
       val consumed = super.dispatchTouchEvent(ev)
       val actionName = when (action) {
         MotionEvent.ACTION_DOWN -> "DOWN"
@@ -88,10 +118,10 @@ class MainActivity : ReactActivity() {
         val loc = IntArray(2)
         window.decorView.getLocationOnScreen(loc)
         val content = window.findViewById<ViewGroup>(android.R.id.content)
-        DiagState.gestureLog = "winXY=%d,%d decor %dx%d content %dx%d confCh=%d focusChanges=%d\\n%s".format(
+        DiagState.gestureLog = "winXY=%d,%d decor %dx%d content %dx%d confCh=%d focusChanges=%d hit=%s\\n%s".format(
           loc[0], loc[1], window.decorView.width, window.decorView.height,
           content?.width ?: -1, content?.height ?: -1,
-          DiagState.configChangedCount, DiagState.focusChangeCount, line
+          DiagState.configChangedCount, DiagState.focusChangeCount, hitDesc, line
         )
       } else {
         DiagState.gestureLog = DiagState.gestureLog + "\\n" + line

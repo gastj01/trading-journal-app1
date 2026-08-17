@@ -1,11 +1,3 @@
-import { enableScreens } from 'react-native-screens'
-// TEMP diag: New Architecture off (previous test) didn't fix the split-screen
-// touch bug, so it's reverted to true in app.json. This tests the next
-// suspect instead: react-native-screens' native ScreenContainer has a known
-// bug class where a visible screen isn't marked active internally, so touch
-// events never reach it. Revert once this question is answered.
-enableScreens(false)
-
 import { useEffect, useState, Component } from 'react'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'

@@ -72,10 +72,16 @@ export default function DashboardScreen() {
             <Text style={s.accountName}>{account?.name ?? 'Trading Journal'}</Text>
             <Text style={s.subtitle}>{account?.platform ?? ''}</Text>
           </View>
-          <TouchableOpacity
-            ref={addBtnRef}
-            style={s.addBtn}
-            onLayout={measureAddBtn}
+          {/* TEMP diag: cap/ts moved off the TouchableOpacity onto this plain
+              View wrapper. Pressability (which TouchableOpacity uses) owns
+              the classic onResponder-family/capture callbacks and was
+              silently shadowing them when they sat directly on the TouchableOpacity —
+              that's the likely reason cap/ts read 0 even on confirmed
+              successful taps. onStartShouldSetResponderCapture returns false
+              so the wrapper only observes, it doesn't steal the touch (a
+              wrapper claiming the responder was already ruled out once as a
+              cause, see SplitScreenDiag history). */}
+          <View
             onStartShouldSetResponderCapture={() => {
               tapDiag.plusResponderCaptureCount++
               tapDiag.lastPlusResponderCaptureAt = Date.now()
@@ -87,14 +93,20 @@ export default function DashboardScreen() {
               tapDiag.lastPlusTouchStartAt = Date.now()
               measureAddBtn()
             }}
-            onPress={() => {
-              tapDiag.plusPressCount++
-              tapDiag.lastPlusPressAt = Date.now()
-              router.push('/trade/new')
-            }}
           >
-            <Feather name="plus" size={20} color="#000" />
-          </TouchableOpacity>
+            <TouchableOpacity
+              ref={addBtnRef}
+              style={s.addBtn}
+              onLayout={measureAddBtn}
+              onPress={() => {
+                tapDiag.plusPressCount++
+                tapDiag.lastPlusPressAt = Date.now()
+                router.push('/trade/new')
+              }}
+            >
+              <Feather name="plus" size={20} color="#000" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Stats Grid */}
