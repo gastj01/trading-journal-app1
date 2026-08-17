@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, Component } from 'react'
+import { useEffect, useState, Component } from 'react'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { supabase } from '../src/lib/supabase'
@@ -11,20 +11,21 @@ import { tapDiag } from '../src/lib/tapDiag'
 
 // TEMP split-screen diagnostic — remove once the touch bug is understood.
 // No longer claims the responder (that was ruled out as the cause: removing it
-// didn't fix the bug). Current hypothesis under test: a px->dp density mismatch
-// between the native decor size and Dimensions.get('screen') in split-screen -
-// PixelRatio.get() plus the measured "+" button rect (dp) let that be checked
-// against the native overlay's px DOWN coordinate (added by
-// plugins/withSplitScreenFix.js) in the same screenshot. plusTouchStartCount
-// (fires on touch delivery, independent of the responder/Pressability chain)
-// separates "button never gets the touch" from "button gets it, onPress doesn't
-// fire anyway".
+// didn't fix the bug). cap/ts/press separate three points in the touch path:
+// onStartShouldSetResponderCapture (native responder negotiation reaches the
+// button), onTouchStart (raw touch delivered), onPress (Pressability actually
+// fires) — narrows down where a failed tap gets lost.
+// age(): "Xs" since a tapDiag timestamp, or "-" if it never fired. Lets a
+// single screenshot taken right after a deliberate tap show whether a given
+// counter just moved, without needing a force-quit for a clean baseline
+// (these counters are cumulative for the whole JS session, not per-tap).
+function age(ts: number, now: number) {
+  return ts === 0 ? '-' : ((now - ts) / 1000).toFixed(1) + 's'
+}
+
 function SplitScreenDiag({ children }: { children: React.ReactNode }) {
-  const rootRef = useRef<View>(null)
   const [dims, setDims] = useState(() => ({ window: Dimensions.get('window'), screen: Dimensions.get('screen') }))
-  const [layout, setLayout] = useState({ w: 0, h: 0 })
-  const [measY, setMeasY] = useState(0)
-  const [diag, setDiag] = useState({ pressCount: 0, touchStartCount: 0, rect: tapDiag.plusButtonRect })
+  const [diag, setDiag] = useState(() => ({ ...tapDiag, now: Date.now() }))
 
   useEffect(() => {
     const sub = Dimensions.addEventListener('change', () => {
@@ -35,36 +36,22 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const id = setInterval(() => {
-      setDiag({ pressCount: tapDiag.plusPressCount, touchStartCount: tapDiag.plusTouchStartCount, rect: tapDiag.plusButtonRect })
+      setDiag({ ...tapDiag, now: Date.now() })
     }, 200)
     return () => clearInterval(id)
   }, [])
 
-  function remeasure() {
-    rootRef.current?.measureInWindow((_x, y) => setMeasY(Math.round(y)))
-  }
-
-  const r = diag.rect
+  const r = diag.plusButtonRect
   return (
-    <View
-      ref={rootRef}
-      style={{ flex: 1 }}
-      onLayout={e => {
-        const { width, height } = e.nativeEvent.layout
-        setLayout({ w: Math.round(width), h: Math.round(height) })
-        remeasure()
-      }}
-    >
+    <View style={{ flex: 1 }}>
       {children}
       <View style={{ position: 'absolute', top: 4, left: 4, zIndex: 9999, elevation: 999 }} pointerEvents="none">
         <View style={{ backgroundColor: '#000000cc', padding: 4, alignSelf: 'flex-start' }}>
           <Text style={{ color: '#0f0', fontSize: 10, includeFontPadding: false }}>
             {[
-              `dp:${PixelRatio.get()} win:${Math.round(dims.window.width)}x${Math.round(dims.window.height)}`,
-              `scr:${Math.round(dims.screen.width)}x${Math.round(dims.screen.height)} layout:${layout.w}x${layout.h}`,
-              `measY:${measY}`,
+              `dp${PixelRatio.get()} win${Math.round(dims.window.width)}x${Math.round(dims.window.height)} scr${Math.round(dims.screen.width)}x${Math.round(dims.screen.height)}`,
               `rect x${r.x} y${r.y} w${r.width} h${r.height}`,
-              `touchStart:${diag.touchStartCount} press:${diag.pressCount}`,
+              `cap:${diag.plusResponderCaptureCount}(${age(diag.lastPlusResponderCaptureAt, diag.now)}) ts:${diag.plusTouchStartCount}(${age(diag.lastPlusTouchStartAt, diag.now)}) press:${diag.plusPressCount}(${age(diag.lastPlusPressAt, diag.now)})`,
             ].join('\n')}
           </Text>
         </View>

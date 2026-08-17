@@ -76,7 +76,17 @@ export default function DashboardScreen() {
             ref={addBtnRef}
             style={s.addBtn}
             onLayout={measureAddBtn}
-            onTouchStart={() => { tapDiag.plusTouchStartCount++; measureAddBtn() }}
+            onStartShouldSetResponderCapture={() => {
+              tapDiag.plusResponderCaptureCount++
+              tapDiag.lastPlusResponderCaptureAt = Date.now()
+              measureAddBtn()
+              return false
+            }}
+            onTouchStart={() => {
+              tapDiag.plusTouchStartCount++
+              tapDiag.lastPlusTouchStartAt = Date.now()
+              measureAddBtn()
+            }}
             onPress={() => {
               tapDiag.plusPressCount++
               tapDiag.lastPlusPressAt = Date.now()
