@@ -124,7 +124,9 @@ export default function RootLayout() {
   }, [session, loading, segments])
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    {/* TEMP diag: swapped GestureHandlerRootView for plain View to test whether
+        RNGH's native touch interception is the cause of the split-screen bug */}
+    <View style={{ flex: 1 }}>
       <SplitScreenDiag>
         <SafeAreaProvider>
           <ErrorBoundary>
@@ -142,6 +144,6 @@ export default function RootLayout() {
           </ErrorBoundary>
         </SafeAreaProvider>
       </SplitScreenDiag>
-    </GestureHandlerRootView>
+    </View>
   )
 }
