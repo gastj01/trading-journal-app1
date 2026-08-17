@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
+import { tapDiag } from '../../src/lib/tapDiag'
 import type { Trade, TradingAccount } from '../../src/types'
 
 export default function DashboardScreen() {
@@ -64,7 +65,11 @@ export default function DashboardScreen() {
             <Text style={s.accountName}>{account?.name ?? 'Trading Journal'}</Text>
             <Text style={s.subtitle}>{account?.platform ?? ''}</Text>
           </View>
-          <TouchableOpacity style={s.addBtn} onPress={() => router.push('/trade/new')}>
+          <TouchableOpacity style={s.addBtn} onPress={() => {
+            tapDiag.plusPressCount++
+            tapDiag.lastPlusPressAt = Date.now()
+            router.push('/trade/new')
+          }}>
             <Feather name="plus" size={20} color="#000" />
           </TouchableOpacity>
         </View>

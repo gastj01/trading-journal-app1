@@ -7,6 +7,7 @@ import { useRouter, useSegments } from 'expo-router'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { View, Text, ScrollView, Alert, Dimensions } from 'react-native'
+import { tapDiag } from '../src/lib/tapDiag'
 
 // TEMP split-screen diagnostic — remove once the touch bug is understood.
 // Claims the responder for every touch to read JS-side coordinates; shows them
@@ -18,12 +19,18 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
   const [layout, setLayout] = useState({ w: 0, h: 0 })
   const [measY, setMeasY] = useState(0)
   const [touch, setTouch] = useState({ pageY: 0, locationY: 0 })
+  const [tapCount, setTapCount] = useState(0)
 
   useEffect(() => {
     const sub = Dimensions.addEventListener('change', () => {
       setDims({ window: Dimensions.get('window'), screen: Dimensions.get('screen') })
     })
     return () => sub.remove()
+  }, [])
+
+  useEffect(() => {
+    const id = setInterval(() => setTapCount(tapDiag.plusPressCount), 200)
+    return () => clearInterval(id)
   }, [])
 
   function remeasure() {
@@ -49,7 +56,7 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
       <View style={{ position: 'absolute', top: '42%', left: 0, right: 0, zIndex: 9999, alignItems: 'center' }} pointerEvents="none">
         <View style={{ backgroundColor: '#000000cc', padding: 4 }}>
           <Text style={{ color: '#0f0', fontSize: 9, textAlign: 'center' }}>
-            {`win ${dims.window.width}x${dims.window.height}\nscr ${dims.screen.width}x${dims.screen.height}\nlayout ${layout.w}x${layout.h} measY ${measY}\ntap pageY ${touch.pageY} locY ${touch.locationY}`}
+            {`win ${dims.window.width}x${dims.window.height}\nscr ${dims.screen.width}x${dims.screen.height}\nlayout ${layout.w}x${layout.h} measY ${measY}\ntap pageY ${touch.pageY} locY ${touch.locationY}\nplusPressCount ${tapCount}`}
           </Text>
         </View>
       </View>
