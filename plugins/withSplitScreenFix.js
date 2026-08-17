@@ -46,6 +46,7 @@ function withTouchDiagOverlay(config) {
   var createCount = 0
   var configChangedCount = 0
   var focusChangeCount = 0
+  var gestureLog = ""
 }
 
 class MainActivity : ReactActivity() {
@@ -71,20 +72,29 @@ class MainActivity : ReactActivity() {
   }
 
   override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
-    if (ev != null && ev.action == MotionEvent.ACTION_DOWN) {
+    val action = ev?.actionMasked
+    if (ev != null && (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)) {
       ensureDiagOverlay()
-      val loc = IntArray(2)
-      window.decorView.getLocationOnScreen(loc)
-      val content = window.findViewById<ViewGroup>(android.R.id.content)
       val consumed = super.dispatchTouchEvent(ev)
-      diagView?.text = "native x=%.0f y=%.0f rawX=%.0f rawY=%.0f winXY=%d,%d creates=%d\\ndecor %dx%d content %dx%d confCh=%d\\nhasWinFocus=%b hasFocus=%b consumed=%b focusChanges=%d".format(
-        ev.x, ev.y, ev.rawX, ev.rawY, loc[0], loc[1], DiagState.createCount,
-        window.decorView.width, window.decorView.height,
-        content?.width ?: -1, content?.height ?: -1,
-        DiagState.configChangedCount,
-        hasWindowFocus(), window.decorView.hasFocus(), consumed,
-        DiagState.focusChangeCount
-      )
+      val actionName = when (action) {
+        MotionEvent.ACTION_DOWN -> "DOWN"
+        MotionEvent.ACTION_UP -> "UP"
+        else -> "CANCEL"
+      }
+      val line = "%s x=%.0f y=%.0f focus=%b consumed=%b".format(actionName, ev.x, ev.y, hasWindowFocus(), consumed)
+      if (action == MotionEvent.ACTION_DOWN) {
+        val loc = IntArray(2)
+        window.decorView.getLocationOnScreen(loc)
+        val content = window.findViewById<ViewGroup>(android.R.id.content)
+        DiagState.gestureLog = "winXY=%d,%d decor %dx%d content %dx%d confCh=%d focusChanges=%d\\n%s".format(
+          loc[0], loc[1], window.decorView.width, window.decorView.height,
+          content?.width ?: -1, content?.height ?: -1,
+          DiagState.configChangedCount, DiagState.focusChangeCount, line
+        )
+      } else {
+        DiagState.gestureLog = DiagState.gestureLog + "\\n" + line
+      }
+      diagView?.text = DiagState.gestureLog
       return consumed
     }
     return super.dispatchTouchEvent(ev)
