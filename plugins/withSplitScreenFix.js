@@ -45,6 +45,7 @@ function withTouchDiagOverlay(config) {
         `object DiagState {
   var createCount = 0
   var configChangedCount = 0
+  var focusChangeCount = 0
 }
 
 class MainActivity : ReactActivity() {
@@ -75,12 +76,16 @@ class MainActivity : ReactActivity() {
       val loc = IntArray(2)
       window.decorView.getLocationOnScreen(loc)
       val content = window.findViewById<ViewGroup>(android.R.id.content)
-      diagView?.text = "native x=%.0f y=%.0f rawX=%.0f rawY=%.0f winXY=%d,%d creates=%d\\ndecor %dx%d content %dx%d confCh=%d".format(
+      val consumed = super.dispatchTouchEvent(ev)
+      diagView?.text = "native x=%.0f y=%.0f rawX=%.0f rawY=%.0f winXY=%d,%d creates=%d\\ndecor %dx%d content %dx%d confCh=%d\\nhasWinFocus=%b hasFocus=%b consumed=%b focusChanges=%d".format(
         ev.x, ev.y, ev.rawX, ev.rawY, loc[0], loc[1], DiagState.createCount,
         window.decorView.width, window.decorView.height,
         content?.width ?: -1, content?.height ?: -1,
-        DiagState.configChangedCount
+        DiagState.configChangedCount,
+        hasWindowFocus(), window.decorView.hasFocus(), consumed,
+        DiagState.focusChangeCount
       )
+      return consumed
     }
     return super.dispatchTouchEvent(ev)
   }
@@ -88,6 +93,11 @@ class MainActivity : ReactActivity() {
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
     DiagState.configChangedCount++
+  }
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    DiagState.focusChangeCount++
   }
 `
       )
