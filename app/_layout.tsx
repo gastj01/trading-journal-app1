@@ -10,9 +10,14 @@ import { View, Text, ScrollView, Alert, Dimensions } from 'react-native'
 import { tapDiag } from '../src/lib/tapDiag'
 
 // TEMP split-screen diagnostic — remove once the touch bug is understood.
-// Claims the responder for every touch to read JS-side coordinates; shows them
-// next to the native overlay (added by plugins/withSplitScreenFix.js) so both
-// sides can be compared from a single screenshot in split screen.
+// Previously claimed the responder for every touch (onStartShouldSetResponder)
+// to read JS-side pageY/locationY. Removed that: if native hit-testing resolves
+// a touch in split-screen to this outer wrapper instead of the actual button
+// (e.g. due to stale bounds after resize), the wrapper claiming the responder
+// would itself swallow the touch before the button ever sees it - which would
+// look exactly like "native dispatchTouchEvent consumed=true, but onPress never
+// fires". Isolating that confound: this round only shows the native overlay
+// (from plugins/withSplitScreenFix.js) and plusPressCount, no responder claim.
 function SplitScreenDiag({ children }: { children: React.ReactNode }) {
   const rootRef = useRef<View>(null)
   const [dims, setDims] = useState(() => ({ window: Dimensions.get('window'), screen: Dimensions.get('screen') }))
@@ -44,11 +49,6 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
       onLayout={e => {
         const { width, height } = e.nativeEvent.layout
         setLayout({ w: Math.round(width), h: Math.round(height) })
-        remeasure()
-      }}
-      onStartShouldSetResponder={() => true}
-      onResponderGrant={e => {
-        setTouch({ pageY: Math.round(e.nativeEvent.pageY), locationY: Math.round(e.nativeEvent.locationY) })
         remeasure()
       }}
     >
