@@ -1,15 +1,23 @@
 const { withAndroidManifest, withMainActivity } = require('@expo/config-plugins')
 
+// Prevents Android from destroying/recreating MainActivity when entering or
+// resizing split-screen / multi-window mode, or on Fold/unfold transitions.
+// Without these flags in configChanges, Android tears down and rebuilds the
+// whole Activity on every resize, which was observed as `creates` jumping
+// from 1 (fullscreen) to 12 (after a single split-screen entry) in the
+// on-screen touch diagnostic — a plausible cause of the split-screen touch bug.
+const REQUIRED_CONFIG_CHANGES = ['screenSize', 'screenLayout', 'smallestScreenSize', 'density']
+
 function withConfigChangesFix(config) {
   return withAndroidManifest(config, (mod) => {
     const activities = mod.modResults.manifest.application[0].activity || []
     for (const activity of activities) {
       if (activity.$['android:name'] === '.MainActivity') {
-        const current = activity.$['android:configChanges'] || ''
-        activity.$['android:configChanges'] = current
-          .split('|')
-          .filter(c => c !== 'screenSize' && c !== 'screenLayout')
-          .join('|')
+        const current = (activity.$['android:configChanges'] || '').split('|').filter(Boolean)
+        for (const flag of REQUIRED_CONFIG_CHANGES) {
+          if (!current.includes(flag)) current.push(flag)
+        }
+        activity.$['android:configChanges'] = current.join('|')
       }
     }
     return mod
