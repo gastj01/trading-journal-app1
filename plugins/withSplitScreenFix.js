@@ -158,7 +158,21 @@ class MainActivity : ReactActivity() {
 }
 
 module.exports = function withSplitScreenFix(config) {
-  config = withConfigChangesFix(config)
+  // TEMP diag test (2026-08-18): withConfigChangesFix disabled. New finding:
+  // in split, everything BELOW roughly the upper portion of the pane is
+  // untouchable (including the tab bar), while content still visually
+  // reflows correctly - a vertical hit-test cutoff, not "Pressability is
+  // broken". This flag was added early on specifically to stop Android from
+  // recreating MainActivity on resize (it prevents recreation, forcing RN
+  // to resize the surface in place instead). That in-place resize is the
+  // prime suspect for the cutoff: visual layout (Yoga/JS) reflows, but the
+  // native hit-test bounds below some line may not. Disabling this lets
+  // Android recreate the Activity on resize again (its default behavior) -
+  // if the cutoff disappears, in-place resize was the actual root cause of
+  // the whole hunt, and the earlier createCount 1->12 observation was
+  // normal-if-noisy recreation, not a bug to suppress. Re-enable if this
+  // test is negative.
+  // config = withConfigChangesFix(config)
   config = withTouchDiagOverlay(config)
   return config
 }
