@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl, StyleSheet } from 'react-native'
 import { useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -12,6 +12,13 @@ export default function DashboardScreen() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [account, setAccount] = useState<TradingAccount | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const addBtnRef = useRef<TouchableOpacity>(null)
+
+  function measureAddBtn() {
+    addBtnRef.current?.measureInWindow((x, y, width, height) => {
+      tapDiag.plusButtonRect = { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) }
+    })
+  }
 
   async function load() {
     const { data: { user } } = await supabase.auth.getUser()
@@ -65,11 +72,17 @@ export default function DashboardScreen() {
             <Text style={s.accountName}>{account?.name ?? 'Trading Journal'}</Text>
             <Text style={s.subtitle}>{account?.platform ?? ''}</Text>
           </View>
-          <TouchableOpacity style={s.addBtn} onPress={() => {
-            tapDiag.plusPressCount++
-            tapDiag.lastPlusPressAt = Date.now()
-            router.push('/trade/new')
-          }}>
+          <TouchableOpacity
+            ref={addBtnRef}
+            style={s.addBtn}
+            onLayout={measureAddBtn}
+            onTouchStart={() => { tapDiag.plusTouchStartCount++; measureAddBtn() }}
+            onPress={() => {
+              tapDiag.plusPressCount++
+              tapDiag.lastPlusPressAt = Date.now()
+              router.push('/trade/new')
+            }}
+          >
             <Feather name="plus" size={20} color="#000" />
           </TouchableOpacity>
         </View>

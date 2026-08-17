@@ -6,25 +6,25 @@ import type { Session } from '@supabase/supabase-js'
 import { useRouter, useSegments } from 'expo-router'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
-import { View, Text, ScrollView, Alert, Dimensions } from 'react-native'
+import { View, Text, ScrollView, Alert, Dimensions, PixelRatio } from 'react-native'
 import { tapDiag } from '../src/lib/tapDiag'
 
 // TEMP split-screen diagnostic — remove once the touch bug is understood.
-// Previously claimed the responder for every touch (onStartShouldSetResponder)
-// to read JS-side pageY/locationY. Removed that: if native hit-testing resolves
-// a touch in split-screen to this outer wrapper instead of the actual button
-// (e.g. due to stale bounds after resize), the wrapper claiming the responder
-// would itself swallow the touch before the button ever sees it - which would
-// look exactly like "native dispatchTouchEvent consumed=true, but onPress never
-// fires". Isolating that confound: this round only shows the native overlay
-// (from plugins/withSplitScreenFix.js) and plusPressCount, no responder claim.
+// No longer claims the responder (that was ruled out as the cause: removing it
+// didn't fix the bug). Current hypothesis under test: a px->dp density mismatch
+// between the native decor size and Dimensions.get('screen') in split-screen -
+// PixelRatio.get() plus the measured "+" button rect (dp) let that be checked
+// against the native overlay's px DOWN coordinate (added by
+// plugins/withSplitScreenFix.js) in the same screenshot. plusTouchStartCount
+// (fires on touch delivery, independent of the responder/Pressability chain)
+// separates "button never gets the touch" from "button gets it, onPress doesn't
+// fire anyway".
 function SplitScreenDiag({ children }: { children: React.ReactNode }) {
   const rootRef = useRef<View>(null)
   const [dims, setDims] = useState(() => ({ window: Dimensions.get('window'), screen: Dimensions.get('screen') }))
   const [layout, setLayout] = useState({ w: 0, h: 0 })
   const [measY, setMeasY] = useState(0)
-  const [touch, setTouch] = useState({ pageY: 0, locationY: 0 })
-  const [tapCount, setTapCount] = useState(0)
+  const [diag, setDiag] = useState({ pressCount: 0, touchStartCount: 0, rect: tapDiag.plusButtonRect })
 
   useEffect(() => {
     const sub = Dimensions.addEventListener('change', () => {
@@ -34,7 +34,9 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
   }, [])
 
   useEffect(() => {
-    const id = setInterval(() => setTapCount(tapDiag.plusPressCount), 200)
+    const id = setInterval(() => {
+      setDiag({ pressCount: tapDiag.plusPressCount, touchStartCount: tapDiag.plusTouchStartCount, rect: tapDiag.plusButtonRect })
+    }, 200)
     return () => clearInterval(id)
   }, [])
 
@@ -42,6 +44,7 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
     rootRef.current?.measureInWindow((_x, y) => setMeasY(Math.round(y)))
   }
 
+  const r = diag.rect
   return (
     <View
       ref={rootRef}
@@ -53,10 +56,10 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
-      <View style={{ position: 'absolute', top: '42%', left: 0, right: 0, zIndex: 9999, alignItems: 'center' }} pointerEvents="none">
-        <View style={{ backgroundColor: '#000000cc', padding: 4 }}>
+      <View style={{ position: 'absolute', top: 4, left: 0, right: 0, zIndex: 9999, alignItems: 'center' }} pointerEvents="none">
+        <View style={{ backgroundColor: '#000000cc', padding: 4, maxWidth: '92%' }}>
           <Text style={{ color: '#0f0', fontSize: 9, textAlign: 'center' }}>
-            {`win ${dims.window.width}x${dims.window.height}\nscr ${dims.screen.width}x${dims.screen.height}\nlayout ${layout.w}x${layout.h} measY ${measY}\ntap pageY ${touch.pageY} locY ${touch.locationY}\nplusPressCount ${tapCount}`}
+            {`px/dp ${PixelRatio.get()} win ${Math.round(dims.window.width)}x${Math.round(dims.window.height)} scr ${Math.round(dims.screen.width)}x${Math.round(dims.screen.height)}\nlayout ${layout.w}x${layout.h} measY ${measY}\nplusRect x${r.x} y${r.y} w${r.width} h${r.height}\ntouchStart ${diag.touchStartCount} pressCount ${diag.pressCount}`}
           </Text>
         </View>
       </View>
@@ -123,10 +126,11 @@ export default function RootLayout() {
     }
   }, [session, loading, segments])
 
-  // TEMP diag: swapped GestureHandlerRootView for plain View to test whether
-  // RNGH's native touch interception is the cause of the split-screen bug
+  // GestureHandlerRootView restored - swapping it for a plain View (previous
+  // diag round) didn't fix the bug, and testing further diag builds without it
+  // means testing a tree two mutations away from the real app.
   return (
-    <View style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <SplitScreenDiag>
         <SafeAreaProvider>
           <ErrorBoundary>
@@ -144,6 +148,6 @@ export default function RootLayout() {
           </ErrorBoundary>
         </SafeAreaProvider>
       </SplitScreenDiag>
-    </View>
+    </GestureHandlerRootView>
   )
 }
