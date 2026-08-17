@@ -74,7 +74,7 @@ class MainActivity : ReactActivity() {
       val loc = IntArray(2)
       window.decorView.getLocationOnScreen(loc)
       val content = window.findViewById<ViewGroup>(android.R.id.content)
-      diagView?.text = "native y=%.0f rawY=%.0f winY=%d creates=%d\ndecor %dx%d content %dx%d confCh=%d".format(
+      diagView?.text = "native y=%.0f rawY=%.0f winY=%d creates=%d\\ndecor %dx%d content %dx%d confCh=%d".format(
         ev.y, ev.rawY, loc[1], DiagState.createCount,
         window.decorView.width, window.decorView.height,
         content?.width ?: -1, content?.height ?: -1,
