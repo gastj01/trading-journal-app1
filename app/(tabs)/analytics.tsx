@@ -499,6 +499,31 @@ ${tradeBlocks.join('\n\n---\n\n')}
         return `Trade ${i + 1}: ${t.symbol} ${t.side.toUpperCase()} | Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'}${note ? ` | KI-Notiz: ${note}` : ''}`
       }).join('\n')
 
+      // Compressed mistake-tag digest: one line per Fehler-Tag (count + avg R), not per
+      // trade — so this stays cheap however many trades are in targetTrades, but still
+      // surfaces recurring mistake patterns explicitly instead of leaving the model to spot
+      // them itself across dozens of ki_note lines.
+      const mistakeDigest = (() => {
+        const idsInBatch = new Set(targetTrades.map(t => t.id))
+        const byTag = new Map<string, { name: string; count: number; rSum: number }>()
+        for (const a of assignments) {
+          if (!idsInBatch.has(a.trade_id)) continue
+          const tag = tagDefs.find(td => td.id === a.tag_id)
+          if (!tag || tag.tag_type !== 'mistake') continue
+          const trade = targetTrades.find(t => t.id === a.trade_id)
+          if (!trade) continue
+          const r = calcWeightedR(trade, eventsByTradeId.get(trade.id) ?? []) ?? 0
+          const entry = byTag.get(tag.id) ?? { name: tag.name.replace(/_/g, ' '), count: 0, rSum: 0 }
+          entry.count++
+          entry.rSum += r
+          byTag.set(tag.id, entry)
+        }
+        return [...byTag.values()]
+          .sort((a, b) => b.count - a.count)
+          .map(e => `  ${e.name}: ${e.count}× (Ø ${e.rSum / e.count > 0 ? '+' : ''}${(e.rSum / e.count).toFixed(2)}R)`)
+          .join('\n')
+      })()
+
       // Reduce step, part 2: full candle detail + screenshots only for a small best/worst
       // sample — this is where the model actually "sees" chart structure, and it stays a
       // fixed size (max 8) no matter how many trades are in targetTrades. Rotates through
@@ -561,6 +586,7 @@ ${isUpdate
 ${previousRuleset}
 ALLE ${isUpdate ? 'NEUEN ' : ''}TRADES (kompakt):
 ${compactBlocks}
+${mistakeDigest ? `\nFEHLER-MUSTER IN DIESEN TRADES:\n${mistakeDigest}\n` : ''}
 ${sampleText ? `\nDETAIL-STICHPROBE (beste/schlechteste ${sampleBlocks.length} mit Kerzendaten${hasImages ? ' + Screenshots oben' : ''}):\n${sampleText}\n` : ''}
 Antworte auf Deutsch:
 
