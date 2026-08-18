@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, StyleSheet } from 'react-native'
+import { View, Text, ScrollView, RefreshControl, StyleSheet } from 'react-native'
 import { useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -167,9 +167,22 @@ function TradeRow({ trade, onPress }: { trade: Trade; onPress: () => void }) {
     isLong ? trade.exit_price > trade.entry_price : trade.exit_price < trade.entry_price
   )
   const date = new Date(trade.opened_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+  const [pressed, setPressed] = useState(false)
 
+  // Split-screen touch bug workaround — same pattern as the "+" button above
+  // and the Journal TradeItem row, both proven fixes (see app/(tabs)/journal.tsx).
   return (
-    <TouchableOpacity style={s.tradeRow} onPress={onPress}>
+    <View
+      style={[s.tradeRow, pressed && s.tradeRowPressed]}
+      onStartShouldSetResponder={() => true}
+      onResponderTerminationRequest={() => false}
+      onResponderGrant={() => setPressed(true)}
+      onResponderRelease={() => {
+        setPressed(false)
+        onPress()
+      }}
+      onResponderTerminate={() => setPressed(false)}
+    >
       <View style={[s.sideBadge, isLong ? s.longBg : s.shortBg]}>
         {isLong ? <Feather name="trending-up" size={14} color="#22c55e" /> : <Feather name="trending-down" size={14} color="#ef4444" />}
       </View>
@@ -184,7 +197,7 @@ function TradeRow({ trade, onPress }: { trade: Trade; onPress: () => void }) {
           : <Text style={[s.result, isWin ? s.green : s.red]}>{isWin ? 'WIN' : 'LOSS'}</Text>
         }
       </View>
-    </TouchableOpacity>
+    </View>
   )
 }
 
@@ -205,6 +218,7 @@ const s = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
   sectionTitle: { color: '#aaa', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
   tradeRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, marginBottom: 8 },
+  tradeRowPressed: { opacity: 0.6 },
   sideBadge: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   longBg: { backgroundColor: '#052e16' },
   shortBg: { backgroundColor: '#2d0a0a' },
