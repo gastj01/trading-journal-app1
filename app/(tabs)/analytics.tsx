@@ -3,6 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import * as Clipboard from 'expo-clipboard'
 import { supabase } from '../../src/lib/supabase'
 import { ANTHROPIC_KEY } from './settings'
 import { calcWeightedR } from '../../src/lib/tradeCalc'
@@ -21,6 +22,12 @@ const INTERVAL_MS: Record<string, number> = {
 }
 
 const NEW_TRADES_THRESHOLD = 10
+
+async function copyKiText(text: string, setCopied: (v: boolean) => void) {
+  await Clipboard.setStringAsync(text)
+  setCopied(true)
+  setTimeout(() => setCopied(false), 1500)
+}
 
 async function buildCandleText(t: Trade, maxBody = 90, pre = 30, post = 30): Promise<string | null> {
   const interval = t.timeframe ? normalizeInterval(t.timeframe) : null
@@ -71,10 +78,12 @@ export default function AnalyticsScreen() {
   const [kiAnalysis, setKiAnalysis] = useState<string | null>(null)
   const [kiLoading, setKiLoading] = useState(false)
   const [kiError, setKiError] = useState<string | null>(null)
+  const [kiCopied, setKiCopied] = useState(false)
   const [combinedAnalysis, setCombinedAnalysis] = useState<string | null>(null)
   const [combinedLoading, setCombinedLoading] = useState(false)
   const [combinedError, setCombinedError] = useState<string | null>(null)
   const [combinedSaved, setCombinedSaved] = useState(false)
+  const [combinedCopied, setCombinedCopied] = useState(false)
   const [autoTagLoading, setAutoTagLoading] = useState(false)
   const [autoTagProgress, setAutoTagProgress] = useState('')
   const [autoTagError, setAutoTagError] = useState<string | null>(null)
@@ -623,7 +632,7 @@ Antworte auf Deutsch:
         headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
-          max_tokens: 2500,
+          max_tokens: 8192,
           messages: [{ role: 'user', content }],
         }),
       })
@@ -921,10 +930,16 @@ Antworte auf Deutsch:
                   if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
                   return <Text key={i} style={s.kiText}>{line}</Text>
                 })}
-                <PressFix onPress={() => setKiAnalysis(null)} style={s.kiRerun}>
-                  <Feather name="refresh-cw" size={12} color="#555" />
-                  <Text style={s.kiRerunText}>Neu analysieren</Text>
-                </PressFix>
+                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
+                  <PressFix onPress={() => setKiAnalysis(null)} style={s.kiRerun}>
+                    <Feather name="refresh-cw" size={12} color="#555" />
+                    <Text style={s.kiRerunText}>Neu analysieren</Text>
+                  </PressFix>
+                  <PressFix onPress={() => copyKiText(kiAnalysis, setKiCopied)} style={s.kiRerun}>
+                    <Feather name={kiCopied ? 'check' : 'copy'} size={12} color={kiCopied ? '#22c55e' : '#555'} />
+                    <Text style={[s.kiRerunText, kiCopied && { color: '#22c55e' }]}>{kiCopied ? 'Kopiert ✓' : 'Kopieren'}</Text>
+                  </PressFix>
+                </View>
               </View>
             )}
 
@@ -989,6 +1004,10 @@ Antworte auf Deutsch:
                   <PressFix onPress={() => setCombinedAnalysis(null)} style={s.kiRerun}>
                     <Feather name="refresh-cw" size={12} color="#555" />
                     <Text style={s.kiRerunText}>Neu analysieren</Text>
+                  </PressFix>
+                  <PressFix onPress={() => copyKiText(combinedAnalysis, setCombinedCopied)} style={s.kiRerun}>
+                    <Feather name={combinedCopied ? 'check' : 'copy'} size={12} color={combinedCopied ? '#22c55e' : '#555'} />
+                    <Text style={[s.kiRerunText, combinedCopied && { color: '#22c55e' }]}>{combinedCopied ? 'Kopiert ✓' : 'Kopieren'}</Text>
                   </PressFix>
                   <PressFix
                     onPress={() => saveAsRuleset(combinedAnalysis, () => {
