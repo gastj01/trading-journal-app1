@@ -7,6 +7,7 @@ import { supabase } from '../../src/lib/supabase'
 import { ANTHROPIC_KEY } from './settings'
 import { calcWeightedR } from '../../src/lib/tradeCalc'
 import { fetchCandles, normalizeSymbol, normalizeInterval } from '../../src/lib/binance'
+import { PressFix } from '../../src/components/PressFix'
 import type { Trade, TagDefinition, StrategyProfile, ManagementEvent } from '../../src/types'
 
 type Period = '7d' | '30d' | '90d' | 'all'
@@ -763,10 +764,10 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
         {activeStrategy && (
           <View style={s.section}>
             {/* Existing performance KI */}
-            <TouchableOpacity style={s.kiBtn} onPress={runStrategyKI} disabled={kiLoading}>
+            <PressFix style={s.kiBtn} onPress={runStrategyKI} disabled={kiLoading}>
               {kiLoading ? <ActivityIndicator size="small" color="#818cf8" /> : <Feather name="cpu" size={16} color="#818cf8" />}
               <Text style={s.kiBtnText}>{kiLoading ? 'Analysiert...' : `"${activeStrategy.name}" mit KI bewerten`}</Text>
-            </TouchableOpacity>
+            </PressFix>
             {kiError && <Text style={s.kiError}>{kiError}</Text>}
             {kiAnalysis && (
               <ScrollView style={s.kiResult} nestedScrollEnabled>
@@ -776,20 +777,20 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
                   if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
                   return <Text key={i} style={s.kiText}>{line}</Text>
                 })}
-                <TouchableOpacity onPress={() => setKiAnalysis(null)} style={s.kiRerun}>
+                <PressFix onPress={() => setKiAnalysis(null)} style={s.kiRerun}>
                   <Feather name="refresh-cw" size={12} color="#555" />
                   <Text style={s.kiRerunText}>Neu analysieren</Text>
-                </TouchableOpacity>
+                </PressFix>
               </ScrollView>
             )}
 
             {/* Auto-Tag & KI Review: alle Trades automatisch taggen */}
-            <TouchableOpacity style={[s.kiBtn, { borderColor: '#a78bfa33', marginTop: 10 }]} onPress={runAutoTag} disabled={autoTagLoading}>
+            <PressFix style={[s.kiBtn, { borderColor: '#a78bfa33', marginTop: 10 }]} onPress={runAutoTag} disabled={autoTagLoading}>
               {autoTagLoading ? <ActivityIndicator size="small" color="#a78bfa" /> : <Feather name="tag" size={16} color="#a78bfa" />}
               <Text style={[s.kiBtnText, { color: '#a78bfa' }]}>
                 {autoTagLoading ? `Auto-Tag läuft... ${autoTagProgress}` : autoTagDone ? `Auto-Tag fertig ✓ (${trades.filter(t => t.strategy_id === activeStrategy!.id).length} Trades)` : `Auto-Tag & KI Review (${trades.filter(t => t.strategy_id === activeStrategy!.id).length} Trades)`}
               </Text>
-            </TouchableOpacity>
+            </PressFix>
             {autoTagError && <Text style={s.kiError}>{autoTagError}</Text>}
 
             {/* Kombinierte Analyse: alle Trades (Kerzen) + beste/schlechteste 8 (Screenshots) */}
@@ -804,12 +805,12 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
                     ? `Regelwerk-Analyse (${totalTrades} Trades · ${Math.min(screenshotCount, 8)} Screenshots)`
                     : `Regelwerk-Analyse (${totalTrades} Trades · keine Screenshots)`
               return (
-                <TouchableOpacity style={[s.kiBtn, { borderColor: '#38bdf833', marginTop: 10 }]} onPress={runCombinedKI} disabled={combinedLoading}>
+                <PressFix style={[s.kiBtn, { borderColor: '#38bdf833', marginTop: 10 }]} onPress={runCombinedKI} disabled={combinedLoading}>
                   {combinedLoading
                     ? <ActivityIndicator size="small" color="#38bdf8" />
                     : <Feather name="layers" size={16} color="#38bdf8" />}
                   <Text style={[s.kiBtnText, { color: '#38bdf8' }]}>{label}</Text>
-                </TouchableOpacity>
+                </PressFix>
               )
             })()}
             {combinedError && <Text style={s.kiError}>{combinedError}</Text>}
@@ -823,16 +824,16 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
                   return <Text key={i} style={s.kiText}>{line}</Text>
                 })}
                 <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
-                  <TouchableOpacity onPress={() => setCombinedAnalysis(null)} style={s.kiRerun}>
+                  <PressFix onPress={() => setCombinedAnalysis(null)} style={s.kiRerun}>
                     <Feather name="refresh-cw" size={12} color="#555" />
                     <Text style={s.kiRerunText}>Neu analysieren</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => saveAsRuleset(combinedAnalysis, () => setCombinedSaved(true))} style={s.kiRerun} disabled={combinedSaved}>
+                  </PressFix>
+                  <PressFix onPress={() => saveAsRuleset(combinedAnalysis, () => setCombinedSaved(true))} style={s.kiRerun} disabled={combinedSaved}>
                     <Feather name="save" size={12} color={combinedSaved ? '#22c55e' : '#f59e0b'} />
                     <Text style={[s.kiRerunText, { color: combinedSaved ? '#22c55e' : '#f59e0b' }]}>
                       {combinedSaved ? 'Gespeichert ✓' : 'Regelwerk + Tags speichern'}
                     </Text>
-                  </TouchableOpacity>
+                  </PressFix>
                 </View>
               </ScrollView>
             )}
