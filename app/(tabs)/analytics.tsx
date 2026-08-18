@@ -79,7 +79,9 @@ export default function AnalyticsScreen() {
   const [autoTagProgress, setAutoTagProgress] = useState('')
   const [autoTagError, setAutoTagError] = useState<string | null>(null)
   const [autoTagDone, setAutoTagDone] = useState(false)
+  const [autoTagFailed, setAutoTagFailed] = useState<Trade[]>([])
   const [combinedProgress, setCombinedProgress] = useState('')
+  const [combinedWarning, setCombinedWarning] = useState<string | null>(null)
   const [rulesetVersions, setRulesetVersions] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -308,14 +310,22 @@ Direkt und präzise. Kein Intro.`
   // Map step: tags + ki_notes for a batch of trades. Shared by the manual "Auto-Tag & KI
   // Review" button (all trades of the strategy) and the Regelwerk-Analyse pre-step (only
   // trades that don't have a ki_note yet), so a trade is never re-summarized needlessly.
+  //
+  // Failure handling: a technical failure (network/API error, or a response that doesn't
+  // parse as JSON) gets one retry, then the batch is given up on and every trade in it is
+  // recorded as failed — but the loop continues with the *next* batch instead of aborting
+  // the whole run, so one bad batch doesn't cost every trade after it. Separately, if the
+  // model returns a JSON array but silently omits a trade that was sent, that trade is
+  // recorded as failed too, even though the batch itself "succeeded".
   async function tagTradesBatch(
     tradesToTag: Trade[],
     key: string,
     userId: string,
     onProgress?: (done: number, total: number) => void,
-  ): Promise<Map<string, string>> {
+  ): Promise<{ notes: Map<string, string>; failed: Trade[] }> {
     const notes = new Map<string, string>()
-    if (tradesToTag.length === 0) return notes
+    const failed: Trade[] = []
+    if (tradesToTag.length === 0) return { notes, failed }
 
     const tagList = tagDefs.map(t => `${t.tag_type}: ${t.name}`).join(', ') || 'Keine Tags vorhanden'
     const BATCH = 5
@@ -340,19 +350,28 @@ ${tradeBlocks.join('\n\n---\n\n')}
 
 [{"trade_id":"...","existing_tags":["tag"],"new_tags":[{"name":"tag","type":"context"}],"ki_note":"2-3 Sätze."}]`
 
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6', max_tokens: 1500,
-          messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
-        }),
-      })
-      if (!res.ok) throw new Error(`API ${res.status}`)
-      const data = await res.json()
-      const text = data.content?.[0]?.text ?? ''
-      const jsonMatch = text.match(/\[[\s\S]*\]/)
-      const results: any[] = jsonMatch ? JSON.parse(jsonMatch[0]) : []
+      let results: any[] | null = null
+      for (let attempt = 1; attempt <= 2 && results === null; attempt++) {
+        try {
+          const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({
+              model: 'claude-sonnet-4-6', max_tokens: 1500,
+              messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+            }),
+          })
+          if (!res.ok) throw new Error(`API ${res.status}`)
+          const data = await res.json()
+          const text = data.content?.[0]?.text ?? ''
+          const jsonMatch = text.match(/\[[\s\S]*\]/)
+          if (!jsonMatch) throw new Error('Keine JSON-Antwort erhalten')
+          results = JSON.parse(jsonMatch[0])
+        } catch {
+          if (attempt === 2) failed.push(...batch)
+        }
+      }
+      if (!results) continue
 
       for (const result of results) {
         // Create new tags
@@ -383,14 +402,20 @@ ${tradeBlocks.join('\n\n---\n\n')}
           notes.set(result.trade_id, result.ki_note)
         }
       }
+
+      // Trades the model silently dropped from its response
+      const returned = new Set(results.map((r: any) => r.trade_id))
+      for (const t of batch) {
+        if (!returned.has(t.id)) failed.push(t)
+      }
     }
 
     setTagDefs(currentTagDefs)
     setTrades(prev => prev.map(t => notes.has(t.id) ? { ...t, ki_notes: notes.get(t.id)! } : t))
-    return notes
+    return { notes, failed }
   }
 
-  async function runAutoTag() {
+  async function runAutoTagFor(tradesToTag: Trade[]) {
     if (!activeStrategy) return
     const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
     if (!key) { setAutoTagError('Kein API Key gesetzt.'); return }
@@ -398,23 +423,32 @@ ${tradeBlocks.join('\n\n---\n\n')}
     setAutoTagLoading(true)
     setAutoTagError(null)
     setAutoTagDone(false)
+    setAutoTagFailed([])
     setAutoTagProgress('')
 
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setAutoTagLoading(false); return }
 
-    const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id)
-    if (stratTrades.length === 0) { setAutoTagError('Keine Trades.'); setAutoTagLoading(false); return }
+    if (tradesToTag.length === 0) { setAutoTagError('Keine Trades.'); setAutoTagLoading(false); return }
 
     try {
-      await tagTradesBatch(stratTrades, key, user.id, (done, total) => setAutoTagProgress(`${done}/${total} Trades...`))
+      const { failed } = await tagTradesBatch(tradesToTag, key, user.id, (done, total) => setAutoTagProgress(`${done}/${total} Trades...`))
       setAutoTagDone(true)
+      setAutoTagFailed(failed)
+      if (failed.length > 0) {
+        setAutoTagError(`${failed.length} von ${tradesToTag.length} Trades fehlgeschlagen (siehe "Erneut versuchen").`)
+      }
     } catch (e: any) {
       setAutoTagError(e?.message ?? 'Fehler')
     } finally {
       setAutoTagLoading(false)
       setAutoTagProgress('')
     }
+  }
+
+  function runAutoTag() {
+    if (!activeStrategy) return
+    runAutoTagFor(trades.filter(t => t.strategy_id === activeStrategy.id))
   }
 
   async function runCombinedKI() {
@@ -432,19 +466,26 @@ ${tradeBlocks.join('\n\n---\n\n')}
 
     setCombinedLoading(true)
     setCombinedError(null)
+    setCombinedWarning(null)
     setCombinedAnalysis(null)
     setCombinedSaved(false)
     setCombinedProgress('')
 
     try {
       // Map step: backfill ki_notes for trades that don't have one yet — reuses the
-      // Auto-Tag batching so this stays cheap even when called repeatedly.
+      // Auto-Tag batching so this stays cheap even when called repeatedly. A trade that
+      // fails here just goes into the reduce step without a ki_note (still gets its
+      // compact result-line); it keeps ki_notes === null, so it's automatically retried
+      // on the next run without any extra bookkeeping.
       const untagged = targetTrades.filter(t => !t.ki_notes)
       const notesById = new Map(targetTrades.filter(t => t.ki_notes).map(t => [t.id, t.ki_notes!]))
       if (untagged.length > 0) {
-        const fresh = await tagTradesBatch(untagged, key, user.id, (done, total) =>
+        const { notes: fresh, failed } = await tagTradesBatch(untagged, key, user.id, (done, total) =>
           setCombinedProgress(`Vorbereitung: ${done}/${total} neue Trades taggen...`))
         fresh.forEach((note, id) => notesById.set(id, note))
+        if (failed.length > 0) {
+          setCombinedWarning(`${failed.length} von ${untagged.length} neuen Trades konnten nicht vorab analysiert werden — werden beim nächsten Lauf erneut versucht.`)
+        }
       }
       setCombinedProgress('Regelwerk wird erstellt...')
 
@@ -869,6 +910,12 @@ Antworte auf Deutsch:
               </Text>
             </PressFix>
             {autoTagError && <Text style={s.kiError}>{autoTagError}</Text>}
+            {autoTagFailed.length > 0 && !autoTagLoading && (
+              <PressFix style={s.retryRow} onPress={() => runAutoTagFor(autoTagFailed)}>
+                <Feather name="refresh-cw" size={12} color="#f59e0b" />
+                <Text style={s.retryRowText}>{autoTagFailed.length} fehlgeschlagene Trades erneut versuchen</Text>
+              </PressFix>
+            )}
 
             {/* Kombinierte Analyse: neue Trades (kompakt) + beste/schlechteste 8 (Kerzen+Screenshots) */}
             {newTradesForRuleset.length >= NEW_TRADES_THRESHOLD && !combinedLoading && !combinedAnalysis && (
@@ -902,6 +949,7 @@ Antworte auf Deutsch:
               )
             })()}
             {combinedError && <Text style={s.kiError}>{combinedError}</Text>}
+            {combinedWarning && <Text style={s.kiWarning}>{combinedWarning}</Text>}
             {combinedAnalysis && (
               <View style={s.kiResult}>
                 <Text style={[s.kiHeading, { color: '#38bdf8', marginBottom: 6 }]}>Regelwerk-Analyse</Text>
@@ -1181,8 +1229,11 @@ const s = StyleSheet.create({
   kiBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1a1a2d', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#818cf833' },
   kiBtnText: { color: '#818cf8', fontSize: 14, fontWeight: '600', flex: 1 },
   kiError: { color: '#ef4444', fontSize: 13, marginTop: 8, fontStyle: 'italic' },
+  kiWarning: { color: '#f59e0b', fontSize: 13, marginTop: 8, fontStyle: 'italic' },
   rulesetHint: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0c1a24', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginTop: 10, borderWidth: 1, borderColor: '#38bdf833' },
   rulesetHintText: { color: '#38bdf8', fontSize: 12, fontWeight: '600' },
+  retryRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  retryRowText: { color: '#f59e0b', fontSize: 12, fontWeight: '600' },
   kiResult: { backgroundColor: '#111', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#1e1e1e' },
   kiHeading: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 10, marginBottom: 2 },
   kiText: { color: '#bbb', fontSize: 13, lineHeight: 20 },
