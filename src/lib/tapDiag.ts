@@ -1,3 +1,8 @@
+// AsyncStorage key for the Diagnose-Schalter in den Einstellungen — overlay
+// is hidden by default, opt-in only (root cause is understood and fixed via
+// PressFix; overlay kept around only in case a regression needs re-diagnosing).
+export const DIAG_OVERLAY_KEY = 'splitScreenDiagEnabled'
+
 // TEMP split-screen touch-bug diagnostic — remove once the bug is understood.
 // Shared counter so we can see whether a TouchableOpacity's onPress actually
 // fires, independent of what the native dispatchTouchEvent overlay shows.

@@ -8,16 +8,17 @@ import type { StyleProp, ViewStyle } from 'react-native'
 // and app/(tabs)/journal.tsx): claiming the responder directly on a plain
 // View and acting on onResponderRelease bypasses Pressability entirely,
 // which is where split-screen taps were silently getting lost.
-export function PressFix({ style, onPress, disabled, children }: {
+export function PressFix({ style, onPress, disabled, activeOpacity = 0.6, children }: {
   style?: StyleProp<ViewStyle>
   onPress?: () => void
   disabled?: boolean
+  activeOpacity?: number
   children?: React.ReactNode
 }) {
   const [pressed, setPressed] = useState(false)
   return (
     <View
-      style={[style, pressed && { opacity: 0.6 }]}
+      style={[style, pressed && { opacity: activeOpacity }]}
       onStartShouldSetResponder={() => !disabled}
       onResponderTerminationRequest={() => false}
       onResponderGrant={() => setPressed(true)}

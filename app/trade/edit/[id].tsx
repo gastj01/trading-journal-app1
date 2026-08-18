@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, Text, TextInput, ScrollView, StyleSheet, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { PressFix } from '../../../src/components/PressFix'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import * as DocumentPicker from 'expo-document-picker'
@@ -348,35 +349,35 @@ export default function EditTradeScreen() {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.closeBtn}>
+        <PressFix onPress={() => router.back()} style={s.closeBtn}>
           <Feather name="x" size={20} color="#aaa" />
-        </TouchableOpacity>
+        </PressFix>
         <Text style={s.title}>Trade bearbeiten</Text>
-        <TouchableOpacity onPress={handleSave} disabled={saving} style={s.saveBtn}>
+        <PressFix onPress={handleSave} disabled={saving} style={s.saveBtn}>
           <Text style={s.saveBtnText}>{saving ? '...' : 'Speichern'}</Text>
-        </TouchableOpacity>
+        </PressFix>
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <Text style={s.label}>Richtung</Text>
         <View style={s.optionRow}>
-          <TouchableOpacity style={[s.option, s.optionLong, form.side === 'long' && s.optionLongActive]} onPress={() => update('side', 'long')}>
+          <PressFix style={[s.option, s.optionLong, form.side === 'long' && s.optionLongActive]} onPress={() => update('side', 'long')}>
             <Text style={[s.optionText, form.side === 'long' && s.green]}>▲ LONG</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.option, s.optionShort, form.side === 'short' && s.optionShortActive]} onPress={() => update('side', 'short')}>
+          </PressFix>
+          <PressFix style={[s.option, s.optionShort, form.side === 'short' && s.optionShortActive]} onPress={() => update('side', 'short')}>
             <Text style={[s.optionText, form.side === 'short' && s.red]}>▼ SHORT</Text>
-          </TouchableOpacity>
+          </PressFix>
         </View>
 
         <Text style={s.label}>Status</Text>
         <View style={s.optionRow}>
-          <TouchableOpacity style={[s.option, form.status === 'open' && s.optionActive]} onPress={() => update('status', 'open')}>
+          <PressFix style={[s.option, form.status === 'open' && s.optionActive]} onPress={() => update('status', 'open')}>
             <Text style={[s.optionText, form.status === 'open' && s.optionTextActive]}>Offen</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.option, form.status === 'closed' && s.optionActive]} onPress={() => update('status', 'closed')}>
+          </PressFix>
+          <PressFix style={[s.option, form.status === 'closed' && s.optionActive]} onPress={() => update('status', 'closed')}>
             <Text style={[s.optionText, form.status === 'closed' && s.optionTextActive]}>Geschlossen</Text>
-          </TouchableOpacity>
+          </PressFix>
         </View>
 
         <View style={s.row2}>
@@ -416,15 +417,15 @@ export default function EditTradeScreen() {
             <View style={{ flex: 1 }}>
               <TextInput style={s.input} placeholderTextColor="#555" value={tp.qty} onChangeText={v => setTpLevels(prev => prev.map((t, j) => j === i ? { ...t, qty: v } : t))} keyboardType="decimal-pad" placeholder="%" />
             </View>
-            <TouchableOpacity onPress={() => setTpLevels(prev => prev.filter((_, j) => j !== i))} style={s.tpRemove}>
+            <PressFix onPress={() => setTpLevels(prev => prev.filter((_, j) => j !== i))} style={s.tpRemove}>
               <Feather name="x" size={16} color="#ef4444" />
-            </TouchableOpacity>
+            </PressFix>
           </View>
         ))}
-        <TouchableOpacity style={s.addTpBtn} onPress={() => setTpLevels(prev => [...prev, { price: '', qty: '' }])}>
+        <PressFix style={s.addTpBtn} onPress={() => setTpLevels(prev => [...prev, { price: '', qty: '' }])}>
           <Feather name="plus" size={14} color="#22c55e" />
           <Text style={s.addTpText}>TP hinzufügen</Text>
-        </TouchableOpacity>
+        </PressFix>
 
         {(() => {
           const calcEntry = parseFloat(form.entry_price) || 0
@@ -462,25 +463,25 @@ export default function EditTradeScreen() {
           <>
             <Text style={s.label}>Strategie</Text>
             <View style={s.optionRow}>
-              <TouchableOpacity
+              <PressFix
                 style={[s.option, !form.strategy_id && s.optionActive]}
                 onPress={() => { update('strategy_id', ''); setRulesExpanded(false); loadChecklistItems('') }}
               >
                 <Text style={[s.optionText, !form.strategy_id && s.optionTextActive]}>Keine</Text>
-              </TouchableOpacity>
+              </PressFix>
               {strategies.map(st => (
-                <TouchableOpacity
+                <PressFix
                   key={st.id}
                   style={[s.option, form.strategy_id === st.id && s.optionActive]}
                   onPress={() => selectStrategy(st.id)}
                 >
                   <Text style={[s.optionText, form.strategy_id === st.id && s.optionTextActive]}>{st.name}</Text>
-                </TouchableOpacity>
+                </PressFix>
               ))}
             </View>
 
             {selectedStrategy?.description ? (
-              <TouchableOpacity style={s.rulesBox} onPress={() => setRulesExpanded(v => !v)} activeOpacity={0.8}>
+              <PressFix style={s.rulesBox} onPress={() => setRulesExpanded(v => !v)} activeOpacity={0.8}>
                 <View style={s.rulesHeader}>
                   <Text style={s.rulesTitle}>Strategie-Regeln</Text>
                   <Feather name={rulesExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#555" />
@@ -488,14 +489,14 @@ export default function EditTradeScreen() {
                 {rulesExpanded && (
                   <Text style={s.rulesText}>{selectedStrategy.description}</Text>
                 )}
-              </TouchableOpacity>
+              </PressFix>
             ) : null}
 
             {checklistItems.length > 0 && (
               <View style={s.checklistSection}>
                 <Text style={s.checklistSectionTitle}>Checkliste</Text>
                 {checklistItems.map(item => (
-                  <TouchableOpacity
+                  <PressFix
                     key={item.id}
                     style={s.checklistRow}
                     onPress={() => toggleChecked(item.id)}
@@ -514,7 +515,7 @@ export default function EditTradeScreen() {
                         <Text style={s.catBadgeText}>{item.category}</Text>
                       </View>
                     ) : null}
-                  </TouchableOpacity>
+                  </PressFix>
                 ))}
               </View>
             )}
@@ -529,22 +530,22 @@ export default function EditTradeScreen() {
             { value: 'visual_backtest', label: 'Backtest' },
             { value: 'managed_live', label: 'Live (managed)' },
           ] as const).map(q => (
-            <TouchableOpacity
+            <PressFix
               key={q.value}
               style={[s.option, form.trade_data_quality === q.value && s.optionActive]}
               onPress={() => update('trade_data_quality', q.value)}
             >
               <Text style={[s.optionText, form.trade_data_quality === q.value && s.optionTextActive]}>{q.label}</Text>
-            </TouchableOpacity>
+            </PressFix>
           ))}
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <Text style={s.label}>Handelszeitpunkt</Text>
-          <TouchableOpacity onPress={() => setShowEntryPicker(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <PressFix onPress={() => setShowEntryPicker(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Feather name="search" size={14} color="#f59e0b" />
             <Text style={{ color: '#f59e0b', fontSize: 12 }}>Kerze wählen</Text>
-          </TouchableOpacity>
+          </PressFix>
         </View>
         <DateTimeInputs
           date={form.opened_at_date} time={form.opened_at_time}
@@ -569,7 +570,7 @@ export default function EditTradeScreen() {
                   </Text>
                   <View style={s.optionRow}>
                     {list.map(tag => (
-                      <TouchableOpacity
+                      <PressFix
                         key={tag.id}
                         style={[s.tagChip, selectedTagIds.includes(tag.id) && s.tagChipActive]}
                         onPress={() => toggleTag(tag.id)}
@@ -577,7 +578,7 @@ export default function EditTradeScreen() {
                         <Text style={[s.tagChipText, selectedTagIds.includes(tag.id) && s.tagChipTextActive]}>
                           {tag.name.replace(/_/g, ' ')}
                         </Text>
-                      </TouchableOpacity>
+                      </PressFix>
                     ))}
                   </View>
                 </View>
@@ -587,7 +588,7 @@ export default function EditTradeScreen() {
         )}
 
         <Text style={s.label}>Screenshot</Text>
-        <TouchableOpacity style={s.screenshotBtn} onPress={handlePickScreenshot} disabled={uploading}>
+        <PressFix style={s.screenshotBtn} onPress={handlePickScreenshot} disabled={uploading}>
           {uploading ? (
             <ActivityIndicator size="small" color="#22c55e" />
           ) : (
@@ -598,11 +599,11 @@ export default function EditTradeScreen() {
               </Text>
             </>
           )}
-        </TouchableOpacity>
+        </PressFix>
         {!!form.screenshot_path && (
-          <TouchableOpacity onPress={() => update('screenshot_path', '')} style={s.removeScreenshot}>
+          <PressFix onPress={() => update('screenshot_path', '')} style={s.removeScreenshot}>
             <Text style={s.removeScreenshotText}>Screenshot entfernen</Text>
-          </TouchableOpacity>
+          </PressFix>
         )}
       </ScrollView>
       </KeyboardAvoidingView>

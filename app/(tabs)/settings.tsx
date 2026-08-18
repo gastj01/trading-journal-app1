@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput, Switch } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../src/lib/supabase'
+import { DIAG_OVERLAY_KEY } from '../../src/lib/tapDiag'
 import type { TradingAccount } from '../../src/types'
 
 export const ANTHROPIC_KEY = 'anthropic_api_key'
@@ -16,6 +17,7 @@ export default function SettingsScreen() {
   const [apiKey, setApiKey] = useState('')
   const [apiKeySaved, setApiKeySaved] = useState(false)
   const [showKey, setShowKey] = useState(false)
+  const [diagEnabled, setDiagEnabled] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -26,9 +28,17 @@ export default function SettingsScreen() {
       setAccounts(data ?? [])
       const stored = await AsyncStorage.getItem(ANTHROPIC_KEY)
       if (stored) { setApiKey(stored); setApiKeySaved(true) }
+      const diagStored = await AsyncStorage.getItem(DIAG_OVERLAY_KEY)
+      setDiagEnabled(diagStored === 'true')
     }
     load()
   }, [])
+
+  async function toggleDiag(value: boolean) {
+    setDiagEnabled(value)
+    await AsyncStorage.setItem(DIAG_OVERLAY_KEY, value ? 'true' : 'false')
+    Alert.alert('Diagnose-Overlay', value ? 'Aktiviert — wird nach App-Neustart angezeigt.' : 'Deaktiviert — wird nach App-Neustart ausgeblendet.')
+  }
 
   async function saveApiKey() {
     const trimmed = apiKey.trim()
@@ -121,6 +131,14 @@ export default function SettingsScreen() {
           <View style={s.row}>
             <Feather name="shield" size={16} color="#888" />
             <Text style={s.infoText}>Version 1.0.0</Text>
+          </View>
+          <View style={s.row}>
+            <Feather name="activity" size={16} color="#888" />
+            <View style={s.rowLeft}>
+              <Text style={s.rowTitle}>Diagnose-Overlay</Text>
+              <Text style={s.rowSub}>Split-Screen-Touch-Debug (Entwickler)</Text>
+            </View>
+            <Switch value={diagEnabled} onValueChange={toggleDiag} trackColor={{ false: '#2a2a2a', true: '#22c55e' }} />
           </View>
         </View>
 

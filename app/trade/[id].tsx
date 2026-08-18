@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Image, ActivityIndicator } from 'react-native'
+import { View, Text, ScrollView, StyleSheet, Alert, Image, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { PressFix } from '../../src/components/PressFix'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -237,9 +238,9 @@ VORHANDENE TAGS: ${tagList}
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.closeBtn}>
+        <PressFix onPress={() => router.back()} style={s.closeBtn}>
           <Feather name="x" size={20} color="#aaa" />
-        </TouchableOpacity>
+        </PressFix>
         <View style={s.headerCenter}>
           <Text style={s.symbol}>{trade.symbol}</Text>
           <View style={[s.sidePill, isLong ? s.longPill : s.shortPill]}>
@@ -248,20 +249,20 @@ VORHANDENE TAGS: ${tagList}
           </View>
         </View>
         <View style={s.headerActions}>
-          <TouchableOpacity onPress={() => router.push(`/trade/manage/${id}`)} style={s.manageBtn}>
+          <PressFix onPress={() => router.push(`/trade/manage/${id}`)} style={s.manageBtn}>
             <Feather name="activity" size={14} color="#000" />
             <Text style={s.manageBtnText}>Verwalten</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push(`/trade/analysis/${id}`)} style={s.aiBtn}>
+          </PressFix>
+          <PressFix onPress={() => router.push(`/trade/analysis/${id}`)} style={s.aiBtn}>
             <Feather name="cpu" size={14} color="#818cf8" />
             <Text style={s.aiBtnText}>KI</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push(`/trade/edit/${id}`)} style={s.closeBtn}>
+          </PressFix>
+          <PressFix onPress={() => router.push(`/trade/edit/${id}`)} style={s.closeBtn}>
             <Feather name="edit-2" size={18} color="#aaa" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleDelete} style={s.closeBtn}>
+          </PressFix>
+          <PressFix onPress={handleDelete} style={s.closeBtn}>
             <Feather name="trash-2" size={18} color="#ef4444" />
-          </TouchableOpacity>
+          </PressFix>
         </View>
       </View>
 
@@ -400,7 +401,7 @@ VORHANDENE TAGS: ${tagList}
         )}
 
         <View style={s.section}>
-          <TouchableOpacity
+          <PressFix
             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1a1a2d', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#818cf833' }}
             onPress={runKiReview}
             disabled={kiLoading}
@@ -410,8 +411,8 @@ VORHANDENE TAGS: ${tagList}
               {kiLoading ? 'KI analysiert...' : kiSaved ? 'KI Review aktualisieren' : 'KI Review & Auto-Tag'}
             </Text>
             {kiSaved && <Feather name="check" size={14} color="#22c55e" />}
-          </TouchableOpacity>
-          <TouchableOpacity
+          </PressFix>
+          <PressFix
             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, paddingHorizontal: 2 }}
             onPress={() => setKiFullCandles(v => !v)}
           >
@@ -419,7 +420,7 @@ VORHANDENE TAGS: ${tagList}
             <Text style={{ color: kiFullCandles ? '#818cf8' : '#555', fontSize: 12 }}>
               {kiFullCandles ? 'Alle Kerzen (kann bei langen Trades fehlschlagen)' : 'Kompakt — max. 150 Kerzen'}
             </Text>
-          </TouchableOpacity>
+          </PressFix>
           {kiError ? <Text style={{ color: '#ef4444', fontSize: 12, marginTop: 6 }}>{kiError}</Text> : null}
         </View>
 

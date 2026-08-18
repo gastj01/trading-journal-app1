@@ -7,7 +7,8 @@ import { useRouter, useSegments } from 'expo-router'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { View, Text, ScrollView, Alert, Dimensions, PixelRatio } from 'react-native'
-import { tapDiag } from '../src/lib/tapDiag'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { tapDiag, DIAG_OVERLAY_KEY } from '../src/lib/tapDiag'
 
 // TEMP split-screen diagnostic — remove once the touch bug is understood.
 // No longer claims the responder (that was ruled out as the cause: removing it
@@ -24,22 +25,34 @@ function age(ts: number, now: number) {
 }
 
 function SplitScreenDiag({ children }: { children: React.ReactNode }) {
+  // Root cause is understood and fixed (PressFix). Overlay is opt-in via the
+  // "Diagnose"-Schalter in den Einstellungen, off by default, in case a
+  // regression needs re-diagnosing later.
+  const [enabled, setEnabled] = useState(false)
   const [dims, setDims] = useState(() => ({ window: Dimensions.get('window'), screen: Dimensions.get('screen') }))
   const [diag, setDiag] = useState(() => ({ ...tapDiag, now: Date.now() }))
 
   useEffect(() => {
+    AsyncStorage.getItem(DIAG_OVERLAY_KEY).then(v => setEnabled(v === 'true'))
+  }, [])
+
+  useEffect(() => {
+    if (!enabled) return
     const sub = Dimensions.addEventListener('change', () => {
       setDims({ window: Dimensions.get('window'), screen: Dimensions.get('screen') })
     })
     return () => sub.remove()
-  }, [])
+  }, [enabled])
 
   useEffect(() => {
+    if (!enabled) return
     const id = setInterval(() => {
       setDiag({ ...tapDiag, now: Date.now() })
     }, 200)
     return () => clearInterval(id)
-  }, [])
+  }, [enabled])
+
+  if (!enabled) return <>{children}</>
 
   const r = diag.plusButtonRect
   // Short, single-value-per-line strings only, most important first — a

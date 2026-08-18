@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  View, Text, ScrollView, TouchableOpacity, TextInput,
+  View, Text, ScrollView, TextInput,
   StyleSheet, Alert, Modal, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { PressFix } from '../../../src/components/PressFix'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../../src/lib/supabase'
@@ -348,9 +349,9 @@ export default function ManageTradeScreen() {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.closeBtn}>
+        <PressFix onPress={() => router.back()} style={s.closeBtn}>
           <Feather name="x" size={20} color="#aaa" />
-        </TouchableOpacity>
+        </PressFix>
         <View style={s.headerCenter}>
           <Text style={s.symbol}>{trade.symbol}</Text>
           <View style={[s.sidePill, isLong ? s.longPill : s.shortPill]}>
@@ -384,10 +385,10 @@ export default function ManageTradeScreen() {
           )}
         </View>
 
-        <TouchableOpacity style={s.candleBtn} onPress={handleDetectFromCandles} disabled={detecting}>
+        <PressFix style={s.candleBtn} onPress={handleDetectFromCandles} disabled={detecting}>
           {detecting ? <ActivityIndicator size="small" color="#f59e0b" /> : <Feather name="activity" size={16} color="#f59e0b" />}
           <Text style={s.candleBtnText}>{detecting ? 'Kerzen werden geladen…' : 'Events aus Kerzen erkennen'}</Text>
-        </TouchableOpacity>
+        </PressFix>
 
         {partialProfits.filter(pp => pp.quantity_percent > 0).length > 0 && (
           <>
@@ -397,7 +398,7 @@ export default function ManageTradeScreen() {
                 const r = calcR(pp.target_price)
                 const alreadyHit = events.some(ev => ev.event_type === 'tp_hit' && Math.abs((ev.price ?? 0) - pp.target_price) < pp.target_price * 0.001)
                 return (
-                  <TouchableOpacity
+                  <PressFix
                     key={pp.id}
                     style={[s.tpBtn, alreadyHit && s.tpBtnHit]}
                     disabled={alreadyHit || loadingTpId === pp.id}
@@ -419,7 +420,7 @@ export default function ManageTradeScreen() {
                     {loadingTpId === pp.id
                       ? <ActivityIndicator size="small" color="#22c55e" style={{ marginTop: 2 }} />
                       : alreadyHit && <Feather name="check" size={12} color="#22c55e" style={{ marginTop: 2 }} />}
-                  </TouchableOpacity>
+                  </PressFix>
                 )
               })}
             </View>
@@ -429,10 +430,10 @@ export default function ManageTradeScreen() {
         <Text style={s.sectionTitle}>Schnellaktionen</Text>
         <View style={s.actionGrid}>
           {ACTIONS.map(action => (
-            <TouchableOpacity key={action.key} style={s.actionBtn} onPress={() => openAction(action)}>
+            <PressFix key={action.key} style={s.actionBtn} onPress={() => openAction(action)}>
               <Feather name={action.icon as any} size={20} color={action.color} />
               <Text style={s.actionLabel}>{action.label}</Text>
-            </TouchableOpacity>
+            </PressFix>
           ))}
         </View>
 
@@ -442,7 +443,7 @@ export default function ManageTradeScreen() {
             {events.map(ev => {
               const r = ev.price && ev.event_type !== 'note' ? calcR(ev.price) : null
               return (
-                <TouchableOpacity key={ev.id} style={s.eventRow} onPress={() => openEdit(ev)} activeOpacity={0.7}>
+                <PressFix key={ev.id} style={s.eventRow} onPress={() => openEdit(ev)} activeOpacity={0.7}>
                   <View style={[s.eventDot, { backgroundColor: EVENT_COLORS[ev.event_type] ?? '#6b7280' }]} />
                   <View style={s.eventContent}>
                     <View style={s.eventTopRow}>
@@ -459,7 +460,7 @@ export default function ManageTradeScreen() {
                     </Text>
                     {ev.note ? <Text style={s.eventNote}>{ev.note}</Text> : null}
                   </View>
-                </TouchableOpacity>
+                </PressFix>
               )
             })}
           </>
@@ -469,21 +470,21 @@ export default function ManageTradeScreen() {
       {/* New event modal */}
       <Modal visible={activeAction !== null} transparent animationType="slide" onRequestClose={closeAction}>
         <KeyboardAvoidingView style={s.modalOverlay} behavior="padding">
-          <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={closeAction} />
+          <PressFix style={s.modalBackdrop} activeOpacity={1} onPress={closeAction} />
           <View style={s.actionPanel}>
             <View style={s.panelHandle} />
             <Text style={s.panelTitle}>{activeAction?.label}</Text>
             <Text style={s.inputLabel}>Zeitpunkt</Text>
             <DateTimeInputs date={eventDate} time={eventTime} onDateChange={setEventDate} onTimeChange={setEventTime} inputStyle={s.panelInput} />
             {activeAction?.showPrice && (price || candlePickerSearchPrice > 0) ? (
-              <TouchableOpacity style={s.candlePickerBtn} onPress={() => { setCandlePickerForEdit(false); setShowCandlePicker(true) }}>
+              <PressFix style={s.candlePickerBtn} onPress={() => { setCandlePickerForEdit(false); setShowCandlePicker(true) }}>
                 <Feather name="clock" size={13} color="#3b82f6" />
                 <Text style={s.candlePickerBtnTxt}>
                   {candlePickerSearchPrice > 0 && candlePickerSearchPrice !== parseFloat(price)
                     ? `Zeitpunkt suchen bei ${candlePickerSearchPrice.toLocaleString()}`
                     : 'Genauen Zeitpunkt aus Kerzen suchen'}
                 </Text>
-              </TouchableOpacity>
+              </PressFix>
             ) : null}
             {activeAction?.showPrice && (<>
               <Text style={s.inputLabel}>Preis</Text>
@@ -496,8 +497,8 @@ export default function ManageTradeScreen() {
             <Text style={s.inputLabel}>Notiz (optional)</Text>
             <TextInput style={[s.panelInput, s.inputMultiline]} value={note} onChangeText={setNote} multiline numberOfLines={3} placeholderTextColor="#555" placeholder="Notiz..." textAlignVertical="top" />
             <View style={s.panelButtons}>
-              <TouchableOpacity style={s.cancelBtn} onPress={closeAction}><Text style={s.cancelBtnText}>Abbrechen</Text></TouchableOpacity>
-              <TouchableOpacity style={s.saveBtn} onPress={handleSave} disabled={saving}><Text style={s.saveBtnText}>{saving ? '...' : 'Speichern'}</Text></TouchableOpacity>
+              <PressFix style={s.cancelBtn} onPress={closeAction}><Text style={s.cancelBtnText}>Abbrechen</Text></PressFix>
+              <PressFix style={s.saveBtn} onPress={handleSave} disabled={saving}><Text style={s.saveBtnText}>{saving ? '...' : 'Speichern'}</Text></PressFix>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -506,22 +507,22 @@ export default function ManageTradeScreen() {
       {/* Edit event modal */}
       <Modal visible={editingEvent !== null} transparent animationType="slide" onRequestClose={closeEdit}>
         <KeyboardAvoidingView style={s.modalOverlay} behavior="padding">
-          <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={closeEdit} />
+          <PressFix style={s.modalBackdrop} activeOpacity={1} onPress={closeEdit} />
           <View style={s.actionPanel}>
             <View style={s.panelHandle} />
             <View style={s.editHeader}>
               <Text style={s.panelTitle}>{editingEvent ? (EVENT_LABELS[editingEvent.event_type] ?? editingEvent.event_type) : ''}</Text>
-              <TouchableOpacity onPress={handleEditDelete} style={s.deleteBtn}>
+              <PressFix onPress={handleEditDelete} style={s.deleteBtn}>
                 <Feather name="trash-2" size={18} color="#ef4444" />
-              </TouchableOpacity>
+              </PressFix>
             </View>
             <Text style={s.inputLabel}>Zeitpunkt</Text>
             <DateTimeInputs date={editDate} time={editTime} onDateChange={setEditDate} onTimeChange={setEditTime} inputStyle={s.panelInput} />
             {editAction?.showPrice && editPrice ? (
-              <TouchableOpacity style={s.candlePickerBtn} onPress={() => { setCandlePickerForEdit(true); setShowCandlePicker(true) }}>
+              <PressFix style={s.candlePickerBtn} onPress={() => { setCandlePickerForEdit(true); setShowCandlePicker(true) }}>
                 <Feather name="clock" size={13} color="#3b82f6" />
                 <Text style={s.candlePickerBtnTxt}>Genauen Zeitpunkt aus Kerzen suchen</Text>
-              </TouchableOpacity>
+              </PressFix>
             ) : null}
             {editAction?.showPrice && (<>
               <Text style={s.inputLabel}>Preis</Text>
@@ -534,8 +535,8 @@ export default function ManageTradeScreen() {
             <Text style={s.inputLabel}>Notiz</Text>
             <TextInput style={[s.panelInput, s.inputMultiline]} value={editNote} onChangeText={setEditNote} multiline numberOfLines={3} placeholderTextColor="#555" placeholder="Notiz..." textAlignVertical="top" />
             <View style={s.panelButtons}>
-              <TouchableOpacity style={s.cancelBtn} onPress={closeEdit}><Text style={s.cancelBtnText}>Abbrechen</Text></TouchableOpacity>
-              <TouchableOpacity style={s.saveBtn} onPress={handleEditSave} disabled={savingEdit}><Text style={s.saveBtnText}>{savingEdit ? '...' : 'Speichern'}</Text></TouchableOpacity>
+              <PressFix style={s.cancelBtn} onPress={closeEdit}><Text style={s.cancelBtnText}>Abbrechen</Text></PressFix>
+              <PressFix style={s.saveBtn} onPress={handleEditSave} disabled={savingEdit}><Text style={s.saveBtnText}>{savingEdit ? '...' : 'Speichern'}</Text></PressFix>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -567,7 +568,7 @@ export default function ManageTradeScreen() {
       {/* Detected events modal */}
       <Modal visible={showDetectedModal} transparent animationType="slide" onRequestClose={() => setShowDetectedModal(false)}>
         <View style={s.modalOverlay}>
-          <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setShowDetectedModal(false)} />
+          <PressFix style={s.modalBackdrop} activeOpacity={1} onPress={() => setShowDetectedModal(false)} />
           <View style={[s.actionPanel, { maxHeight: '80%' }]}>
             <View style={s.panelHandle} />
             <Text style={s.panelTitle}>Erkannte Events</Text>
@@ -576,20 +577,20 @@ export default function ManageTradeScreen() {
               {detectedEvents.map((ev, i) => {
                 const checked = selectedDetected.has(i)
                 return (
-                  <TouchableOpacity key={i} style={[s.detectedRow, checked && s.detectedRowActive]}
+                  <PressFix key={i} style={[s.detectedRow, checked && s.detectedRowActive]}
                     onPress={() => setSelectedDetected(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n })}>
                     <Feather name={checked ? 'check-square' : 'square'} size={18} color={checked ? '#22c55e' : '#555'} />
                     <View style={{ flex: 1 }}>
                       <Text style={s.detectedLabel}>{EVENT_LABELS[ev.event_type] ?? ev.event_type}{ev.size_percent ? ` (${ev.size_percent}%)` : ''}</Text>
                       <Text style={s.detectedMeta}>{ev.price.toLocaleString()} · {new Date(ev.event_time).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</Text>
                     </View>
-                  </TouchableOpacity>
+                  </PressFix>
                 )
               })}
             </ScrollView>
             <View style={s.panelButtons}>
-              <TouchableOpacity style={s.cancelBtn} onPress={() => setShowDetectedModal(false)}><Text style={s.cancelBtnText}>Abbrechen</Text></TouchableOpacity>
-              <TouchableOpacity style={s.saveBtn} onPress={saveDetectedEvents} disabled={savingDetected}><Text style={s.saveBtnText}>{savingDetected ? '...' : `${selectedDetected.size} speichern`}</Text></TouchableOpacity>
+              <PressFix style={s.cancelBtn} onPress={() => setShowDetectedModal(false)}><Text style={s.cancelBtnText}>Abbrechen</Text></PressFix>
+              <PressFix style={s.saveBtn} onPress={saveDetectedEvents} disabled={savingDetected}><Text style={s.saveBtnText}>{savingDetected ? '...' : `${selectedDetected.size} speichern`}</Text></PressFix>
             </View>
           </View>
         </View>
