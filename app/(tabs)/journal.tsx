@@ -205,13 +205,18 @@ function TradeItem({ trade, events, onPress }: { trade: Trade; events: Managemen
   const isLong = trade.side === 'long'
   const rRaw = trade.exit_price != null ? calcWeightedR(trade, events) : null
   const rMultiple = rRaw != null ? rRaw.toFixed(2) : null
+  const [pressed, setPressed] = useState(false)
 
-  // TEMP split-screen touch-bug diagnostic — remove once understood. Same
-  // cap/ts probe construction as the "+" button wrapper (proven not to itself
-  // interfere, see app/(tabs)/index.tsx), wrapped around the whole row here
-  // instead. Tells us whether a dead-row tap reaches JS via the classic
-  // responder path at all, before spending effort converting rows to the
-  // onResponderRelease workaround that only the "+" button has so far.
+  // Split-screen touch bug workaround (same pattern as the "+" button, see
+  // app/(tabs)/index.tsx): 2026-08-20 paired finger-vs-synthetic-input test
+  // on this exact row proved the classic responder path (onStartShould-
+  // SetResponderCapture/onTouchStart, kept below as an observer) fires
+  // identically for both, but TouchableOpacity's Pressability-based onPress
+  // only fires for synthetic input in split-screen — a real finger tap on
+  // the same node never resolves the press. Fix: claim the responder
+  // directly on a plain View and act on onResponderRelease, bypassing
+  // Pressability entirely. onResponderTerminationRequest returns false so
+  // the parent FlatList can't steal the gesture mid-press.
   return (
     <View
       onStartShouldSetResponderCapture={() => {
@@ -224,7 +229,17 @@ function TradeItem({ trade, events, onPress }: { trade: Trade; events: Managemen
         tapDiag.lastRowTouchStartAt = Date.now()
       }}
     >
-    <TouchableOpacity style={s.item} onPress={onPress}>
+    <View
+      style={[s.item, pressed && s.itemPressed]}
+      onStartShouldSetResponder={() => true}
+      onResponderTerminationRequest={() => false}
+      onResponderGrant={() => setPressed(true)}
+      onResponderRelease={() => {
+        setPressed(false)
+        onPress()
+      }}
+      onResponderTerminate={() => setPressed(false)}
+    >
       <View style={[s.sideBar, isLong ? s.longBar : s.shortBar]} />
       <View style={s.itemContent}>
         <View style={s.itemTop}>
@@ -257,7 +272,7 @@ function TradeItem({ trade, events, onPress }: { trade: Trade; events: Managemen
         </View>
         {trade.setup ? <Text style={s.setup} numberOfLines={1}>{trade.setup}</Text> : null}
       </View>
-    </TouchableOpacity>
+    </View>
     </View>
   )
 }
@@ -290,6 +305,7 @@ const s = StyleSheet.create({
   empty: { alignItems: 'center', padding: 40 },
   emptyText: { color: '#555', fontSize: 14 },
   item: { flexDirection: 'row', backgroundColor: '#1a1a1a', borderRadius: 12, marginBottom: 8, overflow: 'hidden' },
+  itemPressed: { opacity: 0.6 },
   sideBar: { width: 3 },
   longBar: { backgroundColor: '#22c55e' },
   shortBar: { backgroundColor: '#ef4444' },
