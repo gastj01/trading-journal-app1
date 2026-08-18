@@ -460,14 +460,27 @@ ${tradeBlocks.join('\n\n---\n\n')}
 
       // Reduce step, part 2: full candle detail + screenshots only for a small best/worst
       // sample — this is where the model actually "sees" chart structure, and it stays a
-      // fixed size (max 8) no matter how many trades are in targetTrades.
-      const sortedByR = [...targetTrades].sort((a, b) =>
+      // fixed size (max 8) no matter how many trades are in targetTrades. Rotates through
+      // ki_sample_reviewed_at so re-running on the same batch (before saving) doesn't just
+      // keep showing the same top/bottom-4 every time — never-reviewed trades go first
+      // (still best/worst-first among those), then the longest-unreviewed ones fill the rest.
+      const byR = (list: Trade[]) => [...list].sort((a, b) =>
         (calcWeightedR(b, eventsByTradeId.get(b.id) ?? []) ?? 0) - (calcWeightedR(a, eventsByTradeId.get(a.id) ?? []) ?? 0))
-      const withScreenshot = sortedByR.filter(t => t.screenshot_path)
-      const sampleTrades = [...new Map([
-        ...withScreenshot.slice(0, 4),
-        ...withScreenshot.slice(-4),
-      ].map(t => [t.id, t])).values()].slice(0, 8)
+      const pickBestWorst = (list: Trade[], n: number) => {
+        const sorted = byR(list)
+        return [...new Map([...sorted.slice(0, Math.ceil(n / 2)), ...sorted.slice(-Math.floor(n / 2))].map(t => [t.id, t])).values()]
+      }
+      const withScreenshot = targetTrades.filter(t => t.screenshot_path)
+      const unreviewed = withScreenshot.filter(t => !t.ki_sample_reviewed_at)
+      const reviewed = withScreenshot
+        .filter(t => t.ki_sample_reviewed_at)
+        .sort((a, b) => new Date(a.ki_sample_reviewed_at!).getTime() - new Date(b.ki_sample_reviewed_at!).getTime())
+
+      let sampleTrades = pickBestWorst(unreviewed, 8)
+      if (sampleTrades.length < 8) {
+        const fill = reviewed.filter(t => !sampleTrades.some(s => s.id === t.id)).slice(0, 8 - sampleTrades.length)
+        sampleTrades = [...sampleTrades, ...fill]
+      }
 
       const sampleBlocks = await Promise.all(sampleTrades.map(async t => {
         const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
@@ -550,6 +563,14 @@ Antworte auf Deutsch:
       if (!res.ok) throw new Error(`API ${res.status}`)
       const data = await res.json()
       setCombinedAnalysis(data.content?.[0]?.text ?? 'Keine Antwort.')
+
+      // Mark this batch as reviewed so the next run (even on the same targetTrades,
+      // e.g. re-running before saving) rotates to different trades instead of repeating.
+      if (sampleTrades.length > 0) {
+        const now = new Date().toISOString()
+        await supabase.from('trades').update({ ki_sample_reviewed_at: now }).in('id', sampleTrades.map(t => t.id))
+        setTrades(prev => prev.map(t => sampleTrades.some(s => s.id === t.id) ? { ...t, ki_sample_reviewed_at: now } : t))
+      }
     } catch (e: any) {
       setCombinedError(e?.message ?? 'Fehler')
     } finally {

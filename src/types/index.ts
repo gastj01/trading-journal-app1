@@ -57,6 +57,7 @@ export interface Trade {
   setup: string
   notes: string
   ki_notes: string | null
+  ki_sample_reviewed_at: string | null
   screenshot_path: string | null
   chart_time_label: string | null
   trade_data_quality: string | null
