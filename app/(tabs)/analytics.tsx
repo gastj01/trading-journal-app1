@@ -20,6 +20,8 @@ const INTERVAL_MS: Record<string, number> = {
   '8h': 28800000, '12h': 43200000, '1d': 86400000,
 }
 
+const NEW_TRADES_THRESHOLD = 10
+
 async function buildCandleText(t: Trade, maxBody = 90, pre = 30, post = 30): Promise<string | null> {
   const interval = t.timeframe ? normalizeInterval(t.timeframe) : null
   if (!interval || !t.opened_at || !t.closed_at) return null
@@ -77,23 +79,31 @@ export default function AnalyticsScreen() {
   const [autoTagProgress, setAutoTagProgress] = useState('')
   const [autoTagError, setAutoTagError] = useState<string | null>(null)
   const [autoTagDone, setAutoTagDone] = useState(false)
+  const [combinedProgress, setCombinedProgress] = useState('')
+  const [rulesetVersions, setRulesetVersions] = useState<Record<string, string>>({})
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const [{ data: tradeData }, { data: asgn }, { data: tags }, { data: strats }, { data: evData }] = await Promise.all([
+      const [{ data: tradeData }, { data: asgn }, { data: tags }, { data: strats }, { data: evData }, { data: rulesetHist }] = await Promise.all([
         supabase.from('trades').select('*').eq('user_id', user.id).eq('status', 'closed').order('opened_at', { ascending: false }),
         supabase.from('trade_tag_assignments').select('tag_id, trade_id').eq('user_id', user.id),
         supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id),
         supabase.from('strategy_profiles').select('*').eq('user_id', user.id).order('name'),
         supabase.from('trade_management_events').select('*').eq('user_id', user.id),
+        supabase.from('strategy_ruleset_history').select('strategy_id, created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
       ])
       setTrades(tradeData ?? [])
       setAssignments(asgn ?? [])
       setTagDefs(tags ?? [])
       setStrategies(strats ?? [])
       setManagementEvents(evData ?? [])
+      const versions: Record<string, string> = {}
+      for (const h of rulesetHist ?? []) {
+        if (!versions[h.strategy_id]) versions[h.strategy_id] = h.created_at
+      }
+      setRulesetVersions(versions)
     }
     load()
   }, [])
@@ -201,6 +211,15 @@ export default function AnalyticsScreen() {
 
   const activeStrategy = selectedStrategy ? strategies.find(s => s.id === selectedStrategy) ?? null : null
 
+  const newTradesForRuleset = useMemo(() => {
+    if (!activeStrategy) return []
+    const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id)
+    const lastVersionAt = rulesetVersions[activeStrategy.id]
+    if (!lastVersionAt) return stratTrades
+    const cutoff = new Date(lastVersionAt).getTime()
+    return stratTrades.filter(t => new Date(t.closed_at ?? t.opened_at).getTime() > cutoff)
+  }, [trades, activeStrategy, rulesetVersions])
+
   async function runStrategyKI() {
     if (!activeStrategy) return
     const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
@@ -286,29 +305,25 @@ Direkt und präzise. Kein Intro.`
     }
   }
 
-  async function runAutoTag() {
-    if (!activeStrategy) return
-    const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
-    if (!key) { setAutoTagError('Kein API Key gesetzt.'); return }
-
-    setAutoTagLoading(true)
-    setAutoTagError(null)
-    setAutoTagDone(false)
-    setAutoTagProgress('')
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setAutoTagLoading(false); return }
-
-    const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id)
-    if (stratTrades.length === 0) { setAutoTagError('Keine Trades.'); setAutoTagLoading(false); return }
+  // Map step: tags + ki_notes for a batch of trades. Shared by the manual "Auto-Tag & KI
+  // Review" button (all trades of the strategy) and the Regelwerk-Analyse pre-step (only
+  // trades that don't have a ki_note yet), so a trade is never re-summarized needlessly.
+  async function tagTradesBatch(
+    tradesToTag: Trade[],
+    key: string,
+    userId: string,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<Map<string, string>> {
+    const notes = new Map<string, string>()
+    if (tradesToTag.length === 0) return notes
 
     const tagList = tagDefs.map(t => `${t.tag_type}: ${t.name}`).join(', ') || 'Keine Tags vorhanden'
     const BATCH = 5
     let currentTagDefs = [...tagDefs]
 
-    for (let i = 0; i < stratTrades.length; i += BATCH) {
-      const batch = stratTrades.slice(i, i + BATCH)
-      setAutoTagProgress(`${Math.min(i + BATCH, stratTrades.length)}/${stratTrades.length} Trades...`)
+    for (let i = 0; i < tradesToTag.length; i += BATCH) {
+      const batch = tradesToTag.slice(i, i + BATCH)
+      onProgress?.(Math.min(i + BATCH, tradesToTag.length), tradesToTag.length)
 
       const tradeBlocks = await Promise.all(batch.map(async (t, bi) => {
         const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
@@ -325,134 +340,175 @@ ${tradeBlocks.join('\n\n---\n\n')}
 
 [{"trade_id":"...","existing_tags":["tag"],"new_tags":[{"name":"tag","type":"context"}],"ki_note":"2-3 Sätze."}]`
 
-      try {
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-6', max_tokens: 1500,
-            messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
-          }),
-        })
-        if (!res.ok) throw new Error(`API ${res.status}`)
-        const data = await res.json()
-        const text = data.content?.[0]?.text ?? ''
-        const jsonMatch = text.match(/\[[\s\S]*\]/)
-        const results: any[] = jsonMatch ? JSON.parse(jsonMatch[0]) : []
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6', max_tokens: 1500,
+          messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+        }),
+      })
+      if (!res.ok) throw new Error(`API ${res.status}`)
+      const data = await res.json()
+      const text = data.content?.[0]?.text ?? ''
+      const jsonMatch = text.match(/\[[\s\S]*\]/)
+      const results: any[] = jsonMatch ? JSON.parse(jsonMatch[0]) : []
 
-        for (const result of results) {
-          // Create new tags
-          if (result.new_tags?.length) {
-            const existing = new Set(currentTagDefs.map((t: TagDefinition) => t.name.toLowerCase()))
-            const toCreate = result.new_tags.filter((nt: any) => !existing.has(nt.name.toLowerCase()))
-            if (toCreate.length) {
-              const { data: created } = await supabase.from('trade_tag_definitions')
-                .insert(toCreate.map((nt: any) => ({ user_id: user.id, name: nt.name, tag_type: nt.type ?? 'context' })))
-                .select()
-              if (created) currentTagDefs = [...currentTagDefs, ...created]
-            }
-          }
-
-          // Assign tags
-          const allNames = new Set([...(result.existing_tags ?? []), ...(result.new_tags?.map((t: any) => t.name) ?? [])])
-          const toAssign = currentTagDefs.filter((td: TagDefinition) => allNames.has(td.name))
-          if (toAssign.length) {
-            await supabase.from('trade_tag_assignments').delete().eq('trade_id', result.trade_id)
-            await supabase.from('trade_tag_assignments').insert(
-              toAssign.map((td: TagDefinition) => ({ trade_id: result.trade_id, tag_id: td.id, user_id: user.id }))
-            )
-          }
-
-          // Save ki_notes
-          if (result.ki_note) {
-            await supabase.from('trades').update({ ki_notes: result.ki_note }).eq('id', result.trade_id)
+      for (const result of results) {
+        // Create new tags
+        if (result.new_tags?.length) {
+          const existing = new Set(currentTagDefs.map((t: TagDefinition) => t.name.toLowerCase()))
+          const toCreate = result.new_tags.filter((nt: any) => !existing.has(nt.name.toLowerCase()))
+          if (toCreate.length) {
+            const { data: created } = await supabase.from('trade_tag_definitions')
+              .insert(toCreate.map((nt: any) => ({ user_id: userId, name: nt.name, tag_type: nt.type ?? 'context' })))
+              .select()
+            if (created) currentTagDefs = [...currentTagDefs, ...created]
           }
         }
-      } catch (e: any) {
-        setAutoTagError(`Batch ${i / BATCH + 1}: ${e?.message}`)
-        setAutoTagLoading(false)
-        return
+
+        // Assign tags
+        const allNames = new Set([...(result.existing_tags ?? []), ...(result.new_tags?.map((t: any) => t.name) ?? [])])
+        const toAssign = currentTagDefs.filter((td: TagDefinition) => allNames.has(td.name))
+        if (toAssign.length) {
+          await supabase.from('trade_tag_assignments').delete().eq('trade_id', result.trade_id)
+          await supabase.from('trade_tag_assignments').insert(
+            toAssign.map((td: TagDefinition) => ({ trade_id: result.trade_id, tag_id: td.id, user_id: userId }))
+          )
+        }
+
+        // Save ki_notes
+        if (result.ki_note) {
+          await supabase.from('trades').update({ ki_notes: result.ki_note }).eq('id', result.trade_id)
+          notes.set(result.trade_id, result.ki_note)
+        }
       }
     }
 
-    setAutoTagDone(true)
-    setAutoTagLoading(false)
+    setTagDefs(currentTagDefs)
+    setTrades(prev => prev.map(t => notes.has(t.id) ? { ...t, ki_notes: notes.get(t.id)! } : t))
+    return notes
+  }
+
+  async function runAutoTag() {
+    if (!activeStrategy) return
+    const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
+    if (!key) { setAutoTagError('Kein API Key gesetzt.'); return }
+
+    setAutoTagLoading(true)
+    setAutoTagError(null)
+    setAutoTagDone(false)
     setAutoTagProgress('')
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setAutoTagLoading(false); return }
+
+    const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id)
+    if (stratTrades.length === 0) { setAutoTagError('Keine Trades.'); setAutoTagLoading(false); return }
+
+    try {
+      await tagTradesBatch(stratTrades, key, user.id, (done, total) => setAutoTagProgress(`${done}/${total} Trades...`))
+      setAutoTagDone(true)
+    } catch (e: any) {
+      setAutoTagError(e?.message ?? 'Fehler')
+    } finally {
+      setAutoTagLoading(false)
+      setAutoTagProgress('')
+    }
   }
 
   async function runCombinedKI() {
     if (!activeStrategy) return
     const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
     if (!key) { setCombinedError('Kein API Key in Einstellungen gesetzt.'); return }
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const targetTrades = newTradesForRuleset
+    if (targetTrades.length === 0) {
+      setCombinedError('Keine neuen Trades seit der letzten Regelwerk-Version.')
+      return
+    }
 
     setCombinedLoading(true)
     setCombinedError(null)
     setCombinedAnalysis(null)
     setCombinedSaved(false)
+    setCombinedProgress('')
 
-    const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id)
-    if (stratTrades.length === 0) {
-      setCombinedError('Keine Trades für diese Strategie.')
-      setCombinedLoading(false)
-      return
-    }
-
-    // All trades with candle data
-    const allTradeBlocks = await Promise.all(stratTrades.map(async (t, i) => {
-      const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
-      const header = `Trade ${i + 1}: ${t.symbol} ${t.side.toUpperCase()} | Entry:${t.entry_price} SL:${t.stop_loss} Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'} | Notes:${t.notes || '—'} | Setup:${t.setup || '—'}`
-      const candleText = t.screenshot_path
-        ? await buildCandleText(t, 40, 20, 20)  // shorter for vision trades — screenshot fills detail
-        : await buildCandleText(t)
-      return { t, r, header, candleText }
-    }))
-
-    // Best 4 + worst 4 with screenshots → vision sample
-    const withScreenshot = allTradeBlocks.filter(d => d.t.screenshot_path)
-    const sorted = [...withScreenshot].sort((a, b) => b.r - a.r)
-    const visionSample = [...new Map([
-      ...sorted.slice(0, 4),
-      ...sorted.slice(-4),
-    ].map(d => [d.t.id, d])).values()].slice(0, 8)
-
-    // Fetch signed URLs for vision sample
-    type VisionData = { tradeIdx: number; imageUrl: string }
-    const visionData: VisionData[] = (await Promise.all(visionSample.map(async d => {
-      let imageUrl: string | null = null
-      try {
-        const { data: compressed } = await supabase.storage.from('trade-screenshots')
-          .createSignedUrl(d.t.screenshot_path!, 3600, { transform: { width: 800, quality: 70 } })
-        imageUrl = compressed?.signedUrl ?? null
-      } catch { /* ignore */ }
-      if (!imageUrl) {
-        const { data: orig } = await supabase.storage.from('trade-screenshots').createSignedUrl(d.t.screenshot_path!, 3600)
-        imageUrl = orig?.signedUrl ?? null
+    try {
+      // Map step: backfill ki_notes for trades that don't have one yet — reuses the
+      // Auto-Tag batching so this stays cheap even when called repeatedly.
+      const untagged = targetTrades.filter(t => !t.ki_notes)
+      const notesById = new Map(targetTrades.filter(t => t.ki_notes).map(t => [t.id, t.ki_notes!]))
+      if (untagged.length > 0) {
+        const fresh = await tagTradesBatch(untagged, key, user.id, (done, total) =>
+          setCombinedProgress(`Vorbereitung: ${done}/${total} neue Trades taggen...`))
+        fresh.forEach((note, id) => notesById.set(id, note))
       }
-      const tradeIdx = stratTrades.findIndex(t => t.id === d.t.id)
-      return imageUrl ? { tradeIdx: tradeIdx + 1, imageUrl } : null
-    }))).filter(Boolean) as VisionData[]
+      setCombinedProgress('Regelwerk wird erstellt...')
 
-    const hasImages = visionData.length > 0
-    const visionTradeNums = new Set(visionData.map(v => v.tradeIdx))
+      // Reduce step, part 1: a compact one-line summary per trade (symbol/result/ki_note)
+      // instead of a full candle dump. Bounded per trade regardless of trade count or
+      // how long a trade was actually held — this is what fixes the 400 at higher trade
+      // counts, since the old version dumped ~150 candle-text lines per trade into one prompt.
+      const compactBlocks = targetTrades.map((t, i) => {
+        const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
+        const note = notesById.get(t.id)
+        return `Trade ${i + 1}: ${t.symbol} ${t.side.toUpperCase()} | Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'}${note ? ` | KI-Notiz: ${note}` : ''}`
+      }).join('\n')
 
-    const textBlocks = allTradeBlocks.map(({ header, candleText, t }, i) => {
-      const num = i + 1
-      const screenshotNote = visionTradeNums.has(num) ? ' [Screenshot oben]' : ''
-      return header + screenshotNote + (candleText ? `\nKERZEN (UTC):\n${candleText}` : '\n(Kein Timeframe)')
-    }).join('\n\n---\n\n')
+      // Reduce step, part 2: full candle detail + screenshots only for a small best/worst
+      // sample — this is where the model actually "sees" chart structure, and it stays a
+      // fixed size (max 8) no matter how many trades are in targetTrades.
+      const sortedByR = [...targetTrades].sort((a, b) =>
+        (calcWeightedR(b, eventsByTradeId.get(b.id) ?? []) ?? 0) - (calcWeightedR(a, eventsByTradeId.get(a.id) ?? []) ?? 0))
+      const withScreenshot = sortedByR.filter(t => t.screenshot_path)
+      const sampleTrades = [...new Map([
+        ...withScreenshot.slice(0, 4),
+        ...withScreenshot.slice(-4),
+      ].map(t => [t.id, t])).values()].slice(0, 8)
 
-    const visionIntro = hasImages
-      ? `Die ersten ${visionData.length} Bilder oben zeigen Trade-Screenshots (beste + schlechteste Trades nach R). Im Textblock sind die zugehörigen Trades mit "[Screenshot oben]" markiert.\n\n`
-      : ''
+      const sampleBlocks = await Promise.all(sampleTrades.map(async t => {
+        const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
+        const header = `${t.symbol} ${t.side.toUpperCase()} | Entry:${t.entry_price} SL:${t.stop_loss} Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'} | Notes:${t.notes || '—'} | Setup:${t.setup || '—'}`
+        const candleText = await buildCandleText(t, 40, 20, 20)
+        return { t, header, candleText }
+      }))
 
-    const prompt = `Du bist ein erfahrener Trading-Coach und Chart-Analyst.
-Analysiere alle ${stratTrades.length} Trades der Strategie "${activeStrategy.name}".
-${activeStrategy.description ? `\nBestehendes Regelwerk:\n${activeStrategy.description}\n` : ''}
-${visionIntro}ALLE TRADES MIT KERZENDATEN (UTC — ENTRY/EXIT markiert):
+      const visionData: { imageUrl: string }[] = (await Promise.all(sampleBlocks.map(async ({ t }) => {
+        let imageUrl: string | null = null
+        try {
+          const { data: compressed } = await supabase.storage.from('trade-screenshots')
+            .createSignedUrl(t.screenshot_path!, 3600, { transform: { width: 800, quality: 70 } })
+          imageUrl = compressed?.signedUrl ?? null
+        } catch { /* ignore */ }
+        if (!imageUrl) {
+          const { data: orig } = await supabase.storage.from('trade-screenshots').createSignedUrl(t.screenshot_path!, 3600)
+          imageUrl = orig?.signedUrl ?? null
+        }
+        return imageUrl ? { imageUrl } : null
+      }))).filter(Boolean) as { imageUrl: string }[]
 
-${textBlocks}
+      const hasImages = visionData.length > 0
+      const sampleText = sampleBlocks
+        .map(({ header, candleText }) => header + (candleText ? `\nKERZEN (UTC):\n${candleText}` : ''))
+        .join('\n\n---\n\n')
 
-Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} ein präzises Regelwerk. Antworte auf Deutsch:
+      const isUpdate = !!rulesetVersions[activeStrategy.id]
+      const previousRuleset = activeStrategy.description
+        ? `\nBESTEHENDES REGELWERK:\n${activeStrategy.description}\n`
+        : ''
+
+      const prompt = `Du bist ein erfahrener Trading-Coach und Chart-Analyst.
+${isUpdate
+  ? `Aktualisiere das Regelwerk der Strategie "${activeStrategy.name}" anhand von ${targetTrades.length} NEUEN Trades seit der letzten Version. Baue auf dem bestehenden Regelwerk auf — verfeinere, ergänze oder korrigiere es, verwirf es nicht ohne guten Grund.`
+  : `Analysiere alle ${targetTrades.length} Trades der Strategie "${activeStrategy.name}" und erstelle ein präzises Regelwerk.`}
+${previousRuleset}
+ALLE ${isUpdate ? 'NEUEN ' : ''}TRADES (kompakt):
+${compactBlocks}
+${sampleText ? `\nDETAIL-STICHPROBE (beste/schlechteste ${sampleBlocks.length} mit Kerzendaten${hasImages ? ' + Screenshots oben' : ''}):\n${sampleText}\n` : ''}
+Antworte auf Deutsch:
 
 **SETUP-KRITERIEN:**
 [Was muss vorliegen — Chart-Struktur, Kontext, Session]
@@ -473,9 +529,8 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
 [Konkrete Tag-Namen, z.B. FVG_vorhanden, NYC_Open, Trend_klar]
 
 **MUSTER AUS DEN DATEN:**
-[Wiederkehrende Zahlen, Zeitpunkte, Kerzenmuster — was siehst du konsistent?]`
+[Wiederkehrende Zahlen, Zeitpunkte, Kerzenmuster — was siehst du konsistent?]${isUpdate ? '\n\n**ÄNDERUNGEN GEGENÜBER DER LETZTEN VERSION:**\n[Was wurde angepasst und warum]' : ''}`
 
-    try {
       const content: any[] = hasImages
         ? [
             ...visionData.map(v => ({ type: 'image' as const, source: { type: 'url' as const, url: v.imageUrl } })),
@@ -499,6 +554,7 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
       setCombinedError(e?.message ?? 'Fehler')
     } finally {
       setCombinedLoading(false)
+      setCombinedProgress('')
     }
   }
 
@@ -793,19 +849,30 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
             </PressFix>
             {autoTagError && <Text style={s.kiError}>{autoTagError}</Text>}
 
-            {/* Kombinierte Analyse: alle Trades (Kerzen) + beste/schlechteste 8 (Screenshots) */}
+            {/* Kombinierte Analyse: neue Trades (kompakt) + beste/schlechteste 8 (Kerzen+Screenshots) */}
+            {newTradesForRuleset.length >= NEW_TRADES_THRESHOLD && !combinedLoading && !combinedAnalysis && (
+              <View style={s.rulesetHint}>
+                <Feather name="bell" size={13} color="#38bdf8" />
+                <Text style={s.rulesetHintText}>
+                  {newTradesForRuleset.length} neue Trades seit {rulesetVersions[activeStrategy!.id] ? 'letztem Regelwerk-Update' : 'Anlage der Strategie'}
+                </Text>
+              </View>
+            )}
             {(() => {
-              const totalTrades = trades.filter(t => t.strategy_id === activeStrategy!.id).length
-              const screenshotCount = trades.filter(t => t.strategy_id === activeStrategy!.id && t.screenshot_path).length
+              const isUpdate = !!rulesetVersions[activeStrategy!.id]
+              const newCount = newTradesForRuleset.length
+              const screenshotCount = newTradesForRuleset.filter(t => t.screenshot_path).length
               const label = combinedLoading
-                ? 'Analysiert...'
+                ? (combinedProgress || 'Analysiert...')
                 : combinedSaved
-                  ? `Analyse fertig ✓`
-                  : screenshotCount > 0
-                    ? `Regelwerk-Analyse (${totalTrades} Trades · ${Math.min(screenshotCount, 8)} Screenshots)`
-                    : `Regelwerk-Analyse (${totalTrades} Trades · keine Screenshots)`
+                  ? 'Analyse fertig ✓'
+                  : newCount === 0
+                    ? 'Regelwerk-Analyse (keine neuen Trades)'
+                    : isUpdate
+                      ? `Regelwerk aktualisieren (${newCount} neue Trades${screenshotCount > 0 ? ` · ${Math.min(screenshotCount, 8)} Screenshots` : ''})`
+                      : `Regelwerk-Analyse (${newCount} Trades${screenshotCount > 0 ? ` · ${Math.min(screenshotCount, 8)} Screenshots` : ''})`
               return (
-                <PressFix style={[s.kiBtn, { borderColor: '#38bdf833', marginTop: 10 }]} onPress={runCombinedKI} disabled={combinedLoading}>
+                <PressFix style={[s.kiBtn, { borderColor: '#38bdf833', marginTop: 10 }]} onPress={runCombinedKI} disabled={combinedLoading || newTradesForRuleset.length === 0}>
                   {combinedLoading
                     ? <ActivityIndicator size="small" color="#38bdf8" />
                     : <Feather name="layers" size={16} color="#38bdf8" />}
@@ -828,7 +895,14 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
                     <Feather name="refresh-cw" size={12} color="#555" />
                     <Text style={s.kiRerunText}>Neu analysieren</Text>
                   </PressFix>
-                  <PressFix onPress={() => saveAsRuleset(combinedAnalysis, () => setCombinedSaved(true))} style={s.kiRerun} disabled={combinedSaved}>
+                  <PressFix
+                    onPress={() => saveAsRuleset(combinedAnalysis, () => {
+                      setCombinedSaved(true)
+                      setRulesetVersions(prev => ({ ...prev, [activeStrategy!.id]: new Date().toISOString() }))
+                    })}
+                    style={s.kiRerun}
+                    disabled={combinedSaved}
+                  >
                     <Feather name="save" size={12} color={combinedSaved ? '#22c55e' : '#f59e0b'} />
                     <Text style={[s.kiRerunText, { color: combinedSaved ? '#22c55e' : '#f59e0b' }]}>
                       {combinedSaved ? 'Gespeichert ✓' : 'Regelwerk + Tags speichern'}
@@ -1086,6 +1160,8 @@ const s = StyleSheet.create({
   kiBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1a1a2d', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#818cf833' },
   kiBtnText: { color: '#818cf8', fontSize: 14, fontWeight: '600', flex: 1 },
   kiError: { color: '#ef4444', fontSize: 13, marginTop: 8, fontStyle: 'italic' },
+  rulesetHint: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0c1a24', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginTop: 10, borderWidth: 1, borderColor: '#38bdf833' },
+  rulesetHintText: { color: '#38bdf8', fontSize: 12, fontWeight: '600' },
   kiResult: { backgroundColor: '#111', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#1e1e1e' },
   kiHeading: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 10, marginBottom: 2 },
   kiText: { color: '#bbb', fontSize: 13, lineHeight: 20 },
