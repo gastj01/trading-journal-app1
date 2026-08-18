@@ -54,6 +54,8 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
     `cap${diag.plusResponderCaptureCount} ${age(diag.lastPlusResponderCaptureAt, diag.now)}`,
     `ts${diag.plusTouchStartCount} ${age(diag.lastPlusTouchStartAt, diag.now)}`,
     `press${diag.plusPressCount} ${age(diag.lastPlusPressAt, diag.now)}`,
+    `rcap${diag.rowResponderCaptureCount} ${age(diag.lastRowResponderCaptureAt, diag.now)}`,
+    `rts${diag.rowTouchStartCount} ${age(diag.lastRowTouchStartAt, diag.now)}`,
     `rect${r.x},${r.y} ${r.width}x${r.height}`,
     `dp${PixelRatio.get().toFixed(2)}`,
     `win${Math.round(dims.window.width)}x${Math.round(dims.window.height)}`,
@@ -63,7 +65,7 @@ function SplitScreenDiag({ children }: { children: React.ReactNode }) {
     <View style={{ flex: 1 }}>
       {children}
       <View style={{ position: 'absolute', top: 4, left: 4, zIndex: 9999, elevation: 999 }} pointerEvents="none">
-        <View style={{ backgroundColor: '#000', padding: 4, width: 150, height: 130 }}>
+        <View style={{ backgroundColor: '#000', padding: 4, width: 150, height: 165 }}>
           {lines.map((line, i) => (
             <Text key={i} style={{ color: '#0f0', fontSize: 10, includeFontPadding: false }} numberOfLines={1}>
               {line}

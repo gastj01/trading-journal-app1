@@ -5,6 +5,7 @@ import { useRouter, useFocusEffect } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
 import { calcWeightedR } from '../../src/lib/tradeCalc'
+import { tapDiag } from '../../src/lib/tapDiag'
 import type { Trade, StrategyProfile, TagDefinition, ManagementEvent } from '../../src/types'
 
 type FilterStatus = 'all' | 'open' | 'closed'
@@ -205,7 +206,24 @@ function TradeItem({ trade, events, onPress }: { trade: Trade; events: Managemen
   const rRaw = trade.exit_price != null ? calcWeightedR(trade, events) : null
   const rMultiple = rRaw != null ? rRaw.toFixed(2) : null
 
+  // TEMP split-screen touch-bug diagnostic — remove once understood. Same
+  // cap/ts probe construction as the "+" button wrapper (proven not to itself
+  // interfere, see app/(tabs)/index.tsx), wrapped around the whole row here
+  // instead. Tells us whether a dead-row tap reaches JS via the classic
+  // responder path at all, before spending effort converting rows to the
+  // onResponderRelease workaround that only the "+" button has so far.
   return (
+    <View
+      onStartShouldSetResponderCapture={() => {
+        tapDiag.rowResponderCaptureCount++
+        tapDiag.lastRowResponderCaptureAt = Date.now()
+        return false
+      }}
+      onTouchStart={() => {
+        tapDiag.rowTouchStartCount++
+        tapDiag.lastRowTouchStartAt = Date.now()
+      }}
+    >
     <TouchableOpacity style={s.item} onPress={onPress}>
       <View style={[s.sideBar, isLong ? s.longBar : s.shortBar]} />
       <View style={s.itemContent}>
@@ -240,6 +258,7 @@ function TradeItem({ trade, events, onPress }: { trade: Trade; events: Managemen
         {trade.setup ? <Text style={s.setup} numberOfLines={1}>{trade.setup}</Text> : null}
       </View>
     </TouchableOpacity>
+    </View>
   )
 }
 

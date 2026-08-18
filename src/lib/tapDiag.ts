@@ -17,4 +17,13 @@ export const tapDiag = {
   // PixelRatio) to tell a coordinate/density mismatch apart from a responder
   // path failure.
   plusButtonRect: { x: 0, y: 0, width: 0, height: 0 },
+  // Same cap/ts probe as the "+" button, but wired to a wrapper around the
+  // Journal TradeItem row instead — the "+" fix (onResponderRelease bypassing
+  // Pressability) was only ever proven for the "+" button itself. This tells
+  // us whether a dead row tap reaches JS at all via the classic responder
+  // path, before spending effort converting rows to the same workaround.
+  rowResponderCaptureCount: 0,
+  lastRowResponderCaptureAt: 0,
+  rowTouchStartCount: 0,
+  lastRowTouchStartAt: 0,
 }
