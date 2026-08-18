@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
+import { TabBarButtonFix } from '../../src/components/TabBarButtonFix'
 
 const TAB_BAR_BG = '#161616'
 const ACTIVE = '#22c55e'
@@ -19,6 +20,8 @@ export default function TabLayout() {
         tabBarActiveTintColor: ACTIVE,
         tabBarInactiveTintColor: INACTIVE,
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        // Split-screen touch bug workaround (see src/components/TabBarButtonFix.tsx)
+        tabBarButton: (props) => <TabBarButtonFix {...props} />,
       }}
     >
       <Tabs.Screen
