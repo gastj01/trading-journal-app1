@@ -588,11 +588,27 @@ ${tradeBlocks.join('\n\n---\n\n')}
         ? `\nBESTEHENDES REGELWERK:\n${activeStrategy.description}\n`
         : ''
 
+      let olderVersionsText = ''
+      if (isUpdate) {
+        const { data: olderVersions } = await supabase
+          .from('strategy_ruleset_history')
+          .select('description, created_at')
+          .eq('strategy_id', activeStrategy.id)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(3)
+        if (olderVersions && olderVersions.length > 0) {
+          olderVersionsText = `\nFRÜHERE REGELWERK-VERSIONEN (neueste zuerst, zur Einordnung ob etwas schon mal ausprobiert oder verworfen wurde):\n${olderVersions
+            .map(v => `--- Version vom ${new Date(v.created_at).toLocaleDateString('de-DE')} ---\n${v.description}`)
+            .join('\n\n')}\n`
+        }
+      }
+
       const prompt = `Du bist ein erfahrener Trading-Coach und Chart-Analyst.
 ${isUpdate
   ? `Aktualisiere das Regelwerk der Strategie "${activeStrategy.name}" anhand von ${targetTrades.length} NEUEN Trades seit der letzten Version. Baue auf dem bestehenden Regelwerk auf — verfeinere, ergänze oder korrigiere es, verwirf es nicht ohne guten Grund.`
   : `Analysiere alle ${targetTrades.length} Trades der Strategie "${activeStrategy.name}" und erstelle ein präzises Regelwerk.`}
-${previousRuleset}
+${previousRuleset}${olderVersionsText}
 ALLE ${isUpdate ? 'NEUEN ' : ''}TRADES (kompakt):
 ${compactBlocks}
 ${mistakeDigest ? `\nFEHLER-MUSTER IN DIESEN TRADES:\n${mistakeDigest}\n` : ''}
