@@ -50,9 +50,15 @@ function withTouchDiagOverlay(config) {
 }
 
 class MainActivity : ReactActivity() {
+  // Root cause of the split-screen touch bug is understood and fixed
+  // (Pressability bypass via onResponderRelease in the RN layer). Overlay
+  // switched off by default so it no longer clutters the screen - flip back
+  // to true and rebuild if a regression needs re-diagnosing.
+  private val diagOverlayEnabled = false
   private var diagView: TextView? = null
 
   private fun ensureDiagOverlay() {
+    if (!diagOverlayEnabled) return
     if (diagView != null) return
     val tv = TextView(this)
     tv.setTextColor(Color.GREEN)
