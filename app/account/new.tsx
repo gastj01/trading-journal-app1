@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, Switch } from 'react-native'
+import { View, Text, TextInput, ScrollView, StyleSheet, Alert, Switch } from 'react-native'
+import { PressFix } from '../../src/components/PressFix'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
@@ -51,13 +52,13 @@ export default function NewAccountScreen() {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.closeBtn}>
+        <PressFix onPress={() => router.back()} style={s.closeBtn}>
           <Feather name="x" size={20} color="#aaa" />
-        </TouchableOpacity>
+        </PressFix>
         <Text style={s.title}>Neues Konto</Text>
-        <TouchableOpacity onPress={handleSave} disabled={saving} style={s.saveBtn}>
+        <PressFix onPress={handleSave} disabled={saving} style={s.saveBtn}>
           <Text style={s.saveBtnText}>{saving ? '...' : 'Speichern'}</Text>
-        </TouchableOpacity>
+        </PressFix>
       </View>
 
       <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
@@ -73,7 +74,7 @@ export default function NewAccountScreen() {
         <Text style={s.label}>Kontotyp</Text>
         <View style={s.optionRow}>
           {(['real', 'demo', 'funded'] as AccountType[]).map(t => (
-            <TouchableOpacity
+            <PressFix
               key={t}
               style={[s.option, form.account_type === t && s.optionActive]}
               onPress={() => update('account_type', t)}
@@ -81,7 +82,7 @@ export default function NewAccountScreen() {
               <Text style={[s.optionText, form.account_type === t && s.optionTextActive]}>
                 {t === 'real' ? 'Real' : t === 'demo' ? 'Demo' : 'Funded'}
               </Text>
-            </TouchableOpacity>
+            </PressFix>
           ))}
         </View>
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput, Switch } from 'react-native'
+import { View, Text, ScrollView, StyleSheet, Alert, TextInput, Switch } from 'react-native'
+import { PressFix } from '../../src/components/PressFix'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
@@ -78,7 +79,7 @@ export default function SettingsScreen() {
         <View style={s.section}>
           <Text style={s.sectionLabel}>Trading-Konten</Text>
           {accounts.map(acc => (
-            <TouchableOpacity key={acc.id} style={s.row}>
+            <PressFix key={acc.id} style={s.row}>
               <View style={s.rowLeft}>
                 <Text style={s.rowTitle}>{acc.name}</Text>
                 <Text style={s.rowSub}>{acc.account_type} · {acc.platform} · ${acc.initial_balance.toLocaleString()}</Text>
@@ -87,11 +88,11 @@ export default function SettingsScreen() {
                 {acc.is_default && <Text style={s.defaultBadge}>Standard</Text>}
                 <Feather name="chevron-right" size={16} color="#555" />
               </View>
-            </TouchableOpacity>
+            </PressFix>
           ))}
-          <TouchableOpacity style={s.addBtn} onPress={() => router.push('/account/new')}>
+          <PressFix style={s.addBtn} onPress={() => router.push('/account/new')}>
             <Text style={s.addBtnText}>+ Konto hinzufügen</Text>
-          </TouchableOpacity>
+          </PressFix>
         </View>
 
         {/* Anthropic API Key */}
@@ -108,16 +109,16 @@ export default function SettingsScreen() {
               autoCapitalize="none"
               autoCorrect={false}
             />
-            <TouchableOpacity onPress={() => setShowKey(v => !v)} style={s.eyeBtn}>
+            <PressFix onPress={() => setShowKey(v => !v)} style={s.eyeBtn}>
               <Feather name={showKey ? 'eye-off' : 'eye'} size={16} color="#555" />
-            </TouchableOpacity>
+            </PressFix>
           </View>
-          <TouchableOpacity style={[s.saveKeyBtn, apiKeySaved && s.saveKeyBtnSaved]} onPress={saveApiKey}>
+          <PressFix style={[s.saveKeyBtn, apiKeySaved && s.saveKeyBtnSaved]} onPress={saveApiKey}>
             <Feather name={apiKeySaved ? 'check' : 'save'} size={14} color={apiKeySaved ? '#22c55e' : '#fff'} />
             <Text style={[s.saveKeyText, apiKeySaved && s.saveKeyTextSaved]}>
               {apiKeySaved ? 'Gespeichert' : 'Speichern'}
             </Text>
-          </TouchableOpacity>
+          </PressFix>
           <Text style={s.apiKeyHint}>Key wird nur lokal auf dem Gerät gespeichert.</Text>
         </View>
 
@@ -143,10 +144,10 @@ export default function SettingsScreen() {
         </View>
 
         {/* Logout */}
-        <TouchableOpacity style={s.logoutBtn} onPress={handleLogout}>
+        <PressFix style={s.logoutBtn} onPress={handleLogout}>
           <Feather name="log-out" size={18} color="#ef4444" />
           <Text style={s.logoutText}>Abmelden</Text>
-        </TouchableOpacity>
+        </PressFix>
       </ScrollView>
     </SafeAreaView>
   )

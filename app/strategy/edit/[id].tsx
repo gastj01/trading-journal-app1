@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, Switch } from 'react-native'
+import { View, Text, TextInput, ScrollView, StyleSheet, Alert, Switch } from 'react-native'
+import { PressFix } from '../../../src/components/PressFix'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
@@ -150,13 +151,13 @@ export default function EditStrategyScreen() {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.closeBtn}>
+        <PressFix onPress={() => router.back()} style={s.closeBtn}>
           <Feather name="x" size={20} color="#aaa" />
-        </TouchableOpacity>
+        </PressFix>
         <Text style={s.title}>Strategie bearbeiten</Text>
-        <TouchableOpacity onPress={handleSave} disabled={saving} style={s.saveBtn}>
+        <PressFix onPress={handleSave} disabled={saving} style={s.saveBtn}>
           <Text style={s.saveBtnText}>{saving ? '...' : 'Speichern'}</Text>
-        </TouchableOpacity>
+        </PressFix>
       </View>
 
       <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
@@ -186,13 +187,13 @@ export default function EditStrategyScreen() {
         <Text style={s.label}>Standard-Timeframe</Text>
         <View style={s.chipRow}>
           {TIMEFRAMES.map(tf => (
-            <TouchableOpacity
+            <PressFix
               key={tf}
               style={[s.chip, form.default_timeframe === tf && s.chipActive]}
               onPress={() => update('default_timeframe', tf)}
             >
               <Text style={[s.chipText, form.default_timeframe === tf && s.chipTextActive]}>{tf}</Text>
-            </TouchableOpacity>
+            </PressFix>
           ))}
         </View>
 
@@ -224,7 +225,7 @@ export default function EditStrategyScreen() {
                     {list.map(tag => {
                       const active = linkedTagIds.includes(tag.id)
                       return (
-                        <TouchableOpacity
+                        <PressFix
                           key={tag.id}
                           style={[s.tagChip, active && s.tagChipActive]}
                           onPress={() => toggleTagLink(tag.id)}
@@ -232,7 +233,7 @@ export default function EditStrategyScreen() {
                           <Text style={[s.tagChipText, active && s.tagChipTextActive]}>
                             {tag.name.replace(/_/g, ' ')}
                           </Text>
-                        </TouchableOpacity>
+                        </PressFix>
                       )
                     })}
                   </View>
@@ -268,9 +269,9 @@ export default function EditStrategyScreen() {
                 thumbColor="#fff"
                 style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
               />
-              <TouchableOpacity onPress={() => handleDeleteItem(item.id)} style={s.deleteBtn}>
+              <PressFix onPress={() => handleDeleteItem(item.id)} style={s.deleteBtn}>
                 <Feather name="trash-2" size={16} color="#ef4444" />
-              </TouchableOpacity>
+              </PressFix>
             </View>
           </View>
         ))}
@@ -310,19 +311,19 @@ export default function EditStrategyScreen() {
               multiline
             />
             <View style={s.addItemBtns}>
-              <TouchableOpacity style={s.cancelBtn} onPress={() => { setShowAddItem(false); setNewItem({ title: '', category: '', kind: '', description: '' }) }}>
+              <PressFix style={s.cancelBtn} onPress={() => { setShowAddItem(false); setNewItem({ title: '', category: '', kind: '', description: '' }) }}>
                 <Text style={s.cancelBtnText}>Abbrechen</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.saveItemBtn} onPress={handleAddItem}>
+              </PressFix>
+              <PressFix style={s.saveItemBtn} onPress={handleAddItem}>
                 <Text style={s.saveItemBtnText}>Speichern</Text>
-              </TouchableOpacity>
+              </PressFix>
             </View>
           </View>
         ) : (
-          <TouchableOpacity style={s.addItemBtn} onPress={() => setShowAddItem(true)}>
+          <PressFix style={s.addItemBtn} onPress={() => setShowAddItem(true)}>
             <Feather name="plus" size={16} color="#22c55e" />
             <Text style={s.addItemBtnText}>Item hinzufügen</Text>
-          </TouchableOpacity>
+          </PressFix>
         )}
       </ScrollView>
     </SafeAreaView>

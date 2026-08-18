@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, Switch } from 'react-native'
+import { View, Text, TextInput, ScrollView, StyleSheet, Alert, Switch } from 'react-native'
+import { PressFix } from '../../src/components/PressFix'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
@@ -45,24 +46,24 @@ export default function NewStrategyScreen() {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.closeBtn}>
+        <PressFix onPress={() => router.back()} style={s.closeBtn}>
           <Feather name="x" size={20} color="#aaa" />
-        </TouchableOpacity>
+        </PressFix>
         <Text style={s.title}>Neue Strategie</Text>
-        <TouchableOpacity onPress={handleSave} disabled={saving} style={s.saveBtn}>
+        <PressFix onPress={handleSave} disabled={saving} style={s.saveBtn}>
           <Text style={s.saveBtnText}>{saving ? '...' : 'Speichern'}</Text>
-        </TouchableOpacity>
+        </PressFix>
       </View>
 
       <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-        <TouchableOpacity style={s.kiBtn} onPress={() => router.push('/strategy/ki-setup')}>
+        <PressFix style={s.kiBtn} onPress={() => router.push('/strategy/ki-setup')}>
           <Feather name="cpu" size={16} color="#818cf8" />
           <View style={s.kiBtnText}>
             <Text style={s.kiBtnTitle}>Mit KI erstellen</Text>
             <Text style={s.kiBtnSub}>KI führt durch 6 Fragen und generiert die Strategie</Text>
           </View>
           <Feather name="chevron-right" size={16} color="#555" />
-        </TouchableOpacity>
+        </PressFix>
 
         <View style={s.divider}>
           <View style={s.dividerLine} />

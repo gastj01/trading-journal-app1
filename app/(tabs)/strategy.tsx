@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput } from 'react-native'
+import { View, Text, ScrollView, StyleSheet, Alert, TextInput } from 'react-native'
+import { PressFix } from '../../src/components/PressFix'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
@@ -116,21 +117,21 @@ export default function StrategyScreen() {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.tabs}>
-        <TouchableOpacity style={[s.tab, tab === 'strategies' && s.tabActive]} onPress={() => setTab('strategies')}>
+        <PressFix style={[s.tab, tab === 'strategies' && s.tabActive]} onPress={() => setTab('strategies')}>
           <Text style={[s.tabText, tab === 'strategies' && s.tabTextActive]}>Strategien</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[s.tab, tab === 'tags' && s.tabActive]} onPress={() => setTab('tags')}>
+        </PressFix>
+        <PressFix style={[s.tab, tab === 'tags' && s.tabActive]} onPress={() => setTab('tags')}>
           <Text style={[s.tabText, tab === 'tags' && s.tabTextActive]}>Tags</Text>
-        </TouchableOpacity>
+        </PressFix>
       </View>
 
       <ScrollView style={s.scroll} contentContainerStyle={s.content}>
         {tab === 'strategies' ? (
           <>
-            <TouchableOpacity style={s.addRow} onPress={() => router.push('/strategy/new')}>
+            <PressFix style={s.addRow} onPress={() => router.push('/strategy/new')}>
               <Feather name="plus" size={16} color="#22c55e" />
               <Text style={s.addText}>Neue Strategie</Text>
-            </TouchableOpacity>
+            </PressFix>
 
             {strategies.map(strat => (
               <View key={strat.id} style={s.card}>
@@ -144,12 +145,12 @@ export default function StrategyScreen() {
                   </View>
                 </View>
                 <View style={s.cardActions}>
-                  <TouchableOpacity style={s.cardAction} onPress={() => router.push(`/strategy/edit/${strat.id}`)}>
+                  <PressFix style={s.cardAction} onPress={() => router.push(`/strategy/edit/${strat.id}`)}>
                     <Feather name="edit-2" size={15} color="#666" />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.cardAction} onPress={() => handleDeleteStrategy(strat)}>
+                  </PressFix>
+                  <PressFix style={s.cardAction} onPress={() => handleDeleteStrategy(strat)}>
                     <Feather name="trash-2" size={15} color="#ef4444" />
-                  </TouchableOpacity>
+                  </PressFix>
                 </View>
               </View>
             ))}
@@ -160,10 +161,10 @@ export default function StrategyScreen() {
           </>
         ) : (
           <>
-            <TouchableOpacity style={s.addRow} onPress={() => { setShowTagForm(v => !v); setEditingTag(null) }}>
+            <PressFix style={s.addRow} onPress={() => { setShowTagForm(v => !v); setEditingTag(null) }}>
               <Feather name="plus" size={16} color="#22c55e" />
               <Text style={s.addText}>Neuer Tag</Text>
-            </TouchableOpacity>
+            </PressFix>
 
             {showTagForm && (
               <View style={s.tagForm}>
@@ -176,7 +177,7 @@ export default function StrategyScreen() {
                 />
                 <View style={s.tagTypeRow}>
                   {(['mistake', 'execution', 'context'] as TagType[]).map(t => (
-                    <TouchableOpacity
+                    <PressFix
                       key={t}
                       style={[s.tagTypeBtn, tagType === t && s.tagTypeBtnActive]}
                       onPress={() => setTagType(t)}
@@ -184,16 +185,16 @@ export default function StrategyScreen() {
                       <Text style={[s.tagTypeBtnText, tagType === t && s.tagTypeBtnTextActive]}>
                         {t === 'mistake' ? 'Fehler' : t === 'execution' ? 'Ausführung' : 'Kontext'}
                       </Text>
-                    </TouchableOpacity>
+                    </PressFix>
                   ))}
                 </View>
                 <View style={s.tagFormBtns}>
-                  <TouchableOpacity style={s.tagCancelBtn} onPress={() => { setShowTagForm(false); setTagName('') }}>
+                  <PressFix style={s.tagCancelBtn} onPress={() => { setShowTagForm(false); setTagName('') }}>
                     <Text style={s.tagCancelBtnText}>Abbrechen</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.tagSaveBtn} onPress={handleSaveTag} disabled={savingTag}>
+                  </PressFix>
+                  <PressFix style={s.tagSaveBtn} onPress={handleSaveTag} disabled={savingTag}>
                     <Text style={s.tagSaveBtnText}>{savingTag ? '...' : 'Speichern'}</Text>
-                  </TouchableOpacity>
+                  </PressFix>
                 </View>
               </View>
             )}
@@ -209,7 +210,7 @@ export default function StrategyScreen() {
                 />
                 <View style={s.tagTypeRow}>
                   {(['mistake', 'execution', 'context'] as TagType[]).map(t => (
-                    <TouchableOpacity
+                    <PressFix
                       key={t}
                       style={[s.tagTypeBtn, editType === t && s.tagTypeBtnActive]}
                       onPress={() => setEditType(t)}
@@ -217,16 +218,16 @@ export default function StrategyScreen() {
                       <Text style={[s.tagTypeBtnText, editType === t && s.tagTypeBtnTextActive]}>
                         {t === 'mistake' ? 'Fehler' : t === 'execution' ? 'Ausführung' : 'Kontext'}
                       </Text>
-                    </TouchableOpacity>
+                    </PressFix>
                   ))}
                 </View>
                 <View style={s.tagFormBtns}>
-                  <TouchableOpacity style={s.tagCancelBtn} onPress={() => setEditingTag(null)}>
+                  <PressFix style={s.tagCancelBtn} onPress={() => setEditingTag(null)}>
                     <Text style={s.tagCancelBtnText}>Abbrechen</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.tagSaveBtn} onPress={handleUpdateTag} disabled={savingTag}>
+                  </PressFix>
+                  <PressFix style={s.tagSaveBtn} onPress={handleUpdateTag} disabled={savingTag}>
                     <Text style={s.tagSaveBtnText}>{savingTag ? '...' : 'Speichern'}</Text>
-                  </TouchableOpacity>
+                  </PressFix>
                 </View>
               </View>
             )}
@@ -243,12 +244,12 @@ export default function StrategyScreen() {
                         <View style={s.tagChip}>
                           <Text style={s.tagChipText}>{tag.name.replace(/_/g, ' ')}</Text>
                         </View>
-                        <TouchableOpacity style={s.tagAction} onPress={() => startEdit(tag)}>
+                        <PressFix style={s.tagAction} onPress={() => startEdit(tag)}>
                           <Feather name="edit-2" size={13} color="#666" />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={s.tagAction} onPress={() => handleDeleteTag(tag)}>
+                        </PressFix>
+                        <PressFix style={s.tagAction} onPress={() => handleDeleteTag(tag)}>
                           <Feather name="trash-2" size={13} color="#ef4444" />
-                        </TouchableOpacity>
+                        </PressFix>
                       </View>
                     ))}
                   </View>

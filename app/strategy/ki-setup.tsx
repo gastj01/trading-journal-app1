@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, Text, TextInput, ScrollView, StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform } from 'react-native'
+import { PressFix } from '../../src/components/PressFix'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
@@ -140,13 +141,13 @@ Halte es kompakt und präzise. Keine Einleitung, keine Zusammenfassung.`
     return (
       <SafeAreaView style={s.safe}>
         <View style={s.header}>
-          <TouchableOpacity onPress={() => setPhase('interview')} style={s.closeBtn}>
+          <PressFix onPress={() => setPhase('interview')} style={s.closeBtn}>
             <Feather name="arrow-left" size={20} color="#aaa" />
-          </TouchableOpacity>
+          </PressFix>
           <Text style={s.title}>Strategie speichern</Text>
-          <TouchableOpacity onPress={handleSave} disabled={saving} style={s.saveBtn}>
+          <PressFix onPress={handleSave} disabled={saving} style={s.saveBtn}>
             <Text style={s.saveBtnText}>{saving ? '...' : 'Speichern'}</Text>
-          </TouchableOpacity>
+          </PressFix>
         </View>
         <ScrollView style={s.scroll} contentContainerStyle={s.content}>
           <Text style={s.label}>Name</Text>
@@ -174,9 +175,9 @@ Halte es kompakt und präzise. Keine Einleitung, keine Zusammenfassung.`
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.closeBtn}>
+        <PressFix onPress={() => router.back()} style={s.closeBtn}>
           <Feather name="x" size={20} color="#aaa" />
-        </TouchableOpacity>
+        </PressFix>
         <Text style={s.title}>Strategie mit KI erstellen</Text>
         <View style={{ width: 36 }} />
       </View>
@@ -214,9 +215,9 @@ Halte es kompakt und präzise. Keine Einleitung, keine Zusammenfassung.`
               returnKeyType="send"
               onSubmitEditing={sendAnswer}
             />
-            <TouchableOpacity onPress={sendAnswer} style={s.sendBtn} disabled={!input.trim()}>
+            <PressFix onPress={sendAnswer} style={s.sendBtn} disabled={!input.trim()}>
               <Feather name="send" size={18} color={input.trim() ? '#818cf8' : '#333'} />
-            </TouchableOpacity>
+            </PressFix>
           </View>
         </KeyboardAvoidingView>
       )}

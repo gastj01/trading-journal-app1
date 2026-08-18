@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native'
+import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native'
+import { PressFix } from '../../src/components/PressFix'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { supabase } from '../../src/lib/supabase'
 
@@ -47,9 +48,9 @@ export default function LoginScreen() {
             secureTextEntry
           />
 
-          <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={handleLogin} disabled={loading}>
+          <PressFix style={[s.btn, loading && s.btnDisabled]} onPress={handleLogin} disabled={loading}>
             <Text style={s.btnText}>{loading ? 'Wird angemeldet...' : 'Anmelden'}</Text>
-          </TouchableOpacity>
+          </PressFix>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

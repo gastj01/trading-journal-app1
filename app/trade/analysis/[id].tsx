@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput, Alert } from 'react-native'
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TextInput, Alert } from 'react-native'
+import { PressFix } from '../../../src/components/PressFix'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
@@ -164,9 +165,9 @@ export default function TradeAnalysisScreen() {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.closeBtn}>
+        <PressFix onPress={() => router.back()} style={s.closeBtn}>
           <Feather name="x" size={20} color="#aaa" />
-        </TouchableOpacity>
+        </PressFix>
         <Text style={s.title}>KI-Analyse</Text>
         <View style={{ width: 36 }} />
       </View>
@@ -217,21 +218,21 @@ export default function TradeAnalysisScreen() {
               textAlignVertical="top"
             />
             <View style={s.templateBtns}>
-              <TouchableOpacity style={s.templateBtn} onPress={savePromptTemplate}>
+              <PressFix style={s.templateBtn} onPress={savePromptTemplate}>
                 <Feather name="bookmark" size={13} color="#f59e0b" />
                 <Text style={s.templateBtnText}>Als Vorlage speichern</Text>
-              </TouchableOpacity>
+              </PressFix>
               {hasCustomTemplate && (
-                <TouchableOpacity style={s.templateBtn} onPress={resetPromptTemplate}>
+                <PressFix style={s.templateBtn} onPress={resetPromptTemplate}>
                   <Feather name="rotate-ccw" size={13} color="#666" />
                   <Text style={[s.templateBtnText, { color: '#666' }]}>Standard</Text>
-                </TouchableOpacity>
+                </PressFix>
               )}
             </View>
-            <TouchableOpacity style={s.analyzeBtn} onPress={runAnalysis} disabled={!hasKey}>
+            <PressFix style={s.analyzeBtn} onPress={runAnalysis} disabled={!hasKey}>
               <Feather name="cpu" size={18} color="#000" />
               <Text style={s.analyzeBtnText}>Analysieren</Text>
-            </TouchableOpacity>
+            </PressFix>
           </>
         )}
 
@@ -245,27 +246,27 @@ export default function TradeAnalysisScreen() {
         {phase === 'error' && (
           <View style={s.errorBox}>
             <Text style={s.errorText}>{error}</Text>
-            <TouchableOpacity onPress={resetToPrompt} style={s.retryBtn}>
+            <PressFix onPress={resetToPrompt} style={s.retryBtn}>
               <Text style={s.retryText}>Zurück zum Prompt</Text>
-            </TouchableOpacity>
+            </PressFix>
           </View>
         )}
 
         {phase === 'result' && analysis && (
           <>
             <AnalysisText text={analysis} />
-            <TouchableOpacity style={s.rerunBtn} onPress={resetToPrompt}>
+            <PressFix style={s.rerunBtn} onPress={resetToPrompt}>
               <Feather name="edit-2" size={14} color="#666" />
               <Text style={s.rerunText}>Prompt bearbeiten & neu analysieren</Text>
-            </TouchableOpacity>
+            </PressFix>
 
             {strategy && (
               <View style={s.stratEditBox}>
-                <TouchableOpacity style={s.stratEditHeader} onPress={() => strategyEditOpen ? setStrategyEditOpen(false) : openStrategyEdit()}>
+                <PressFix style={s.stratEditHeader} onPress={() => strategyEditOpen ? setStrategyEditOpen(false) : openStrategyEdit()}>
                   <Feather name="book-open" size={14} color="#818cf8" />
                   <Text style={s.stratEditTitle}>Strategie-Regelwerk bearbeiten</Text>
                   <Feather name={strategyEditOpen ? 'chevron-up' : 'chevron-down'} size={14} color="#555" />
-                </TouchableOpacity>
+                </PressFix>
                 {strategyEditOpen && (
                   <>
                     <TextInput
@@ -278,12 +279,12 @@ export default function TradeAnalysisScreen() {
                       placeholder="Strategie-Regeln..."
                     />
                     <View style={s.stratEditBtns}>
-                      <TouchableOpacity style={s.stratCancelBtn} onPress={() => setStrategyEditOpen(false)}>
+                      <PressFix style={s.stratCancelBtn} onPress={() => setStrategyEditOpen(false)}>
                         <Text style={s.stratCancelText}>Abbrechen</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={s.stratSaveBtn} onPress={saveStrategyDescription} disabled={strategySaving}>
+                      </PressFix>
+                      <PressFix style={s.stratSaveBtn} onPress={saveStrategyDescription} disabled={strategySaving}>
                         <Text style={s.stratSaveText}>{strategySaving ? '...' : 'Speichern'}</Text>
-                      </TouchableOpacity>
+                      </PressFix>
                     </View>
                   </>
                 )}
