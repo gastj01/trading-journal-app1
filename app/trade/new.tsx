@@ -8,6 +8,7 @@ import * as FileSystem from 'expo-file-system/legacy'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../src/lib/supabase'
 import { nowDateStr, nowTimeStr, parseDateTimeToISO } from '../../src/lib/datetime'
+import { PressFix } from '../../src/components/PressFix'
 import { DateTimeInputs } from '../../src/components/DateTimeInputs'
 import { CandleTimePicker } from '../../src/components/CandleTimePicker'
 import { fetchCandles, normalizeSymbol, normalizeInterval } from '../../src/lib/binance'
@@ -510,15 +511,15 @@ Bewerte auf Deutsch:
             <View style={{ flex: 1 }}>
               <Input value={tp.qty} onChangeText={v => setTpLevels(prev => prev.map((t, j) => j === i ? { ...t, qty: v } : t))} keyboardType="decimal-pad" placeholder="%" />
             </View>
-            <TouchableOpacity onPress={() => setTpLevels(prev => prev.filter((_, j) => j !== i))} style={s.tpRemove}>
+            <PressFix onPress={() => setTpLevels(prev => prev.filter((_, j) => j !== i))} style={s.tpRemove}>
               <Feather name="x" size={16} color="#ef4444" />
-            </TouchableOpacity>
+            </PressFix>
           </View>
         ))}
-        <TouchableOpacity style={s.addTpBtn} onPress={() => setTpLevels(prev => [...prev, { price: '', qty: '' }])}>
+        <PressFix style={s.addTpBtn} onPress={() => setTpLevels(prev => [...prev, { price: '', qty: '' }])}>
           <Feather name="plus" size={14} color="#22c55e" />
           <Text style={s.addTpText}>TP hinzufügen</Text>
-        </TouchableOpacity>
+        </PressFix>
 
         <Label text="Break Even bei Preis (optional)" />
         <Input value={bePrice} onChangeText={setBePrice} keyboardType="decimal-pad" placeholder="Preis bei dem SL auf BE gesetzt wird" />
@@ -527,25 +528,25 @@ Bewerte auf Deutsch:
           <>
             <Label text="Strategie" />
             <View style={s.optionRow}>
-              <TouchableOpacity
+              <PressFix
                 style={[s.option, !form.strategy_id && s.optionActive]}
                 onPress={() => { update('strategy_id', ''); setRulesExpanded(false); loadChecklistItems('') }}
               >
                 <Text style={[s.optionText, !form.strategy_id && s.optionTextActive]}>Keine</Text>
-              </TouchableOpacity>
+              </PressFix>
               {strategies.map(st => (
-                <TouchableOpacity
+                <PressFix
                   key={st.id}
                   style={[s.option, form.strategy_id === st.id && s.optionActive]}
                   onPress={() => selectStrategy(st.id)}
                 >
                   <Text style={[s.optionText, form.strategy_id === st.id && s.optionTextActive]}>{st.name}</Text>
-                </TouchableOpacity>
+                </PressFix>
               ))}
             </View>
 
             {selectedStrategy?.description ? (
-              <TouchableOpacity style={s.rulesBox} onPress={() => setRulesExpanded(v => !v)} activeOpacity={0.8}>
+              <PressFix style={s.rulesBox} onPress={() => setRulesExpanded(v => !v)}>
                 <View style={s.rulesHeader}>
                   <Text style={s.rulesTitle}>Strategie-Regeln</Text>
                   <Feather name={rulesExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#555" />
@@ -553,18 +554,17 @@ Bewerte auf Deutsch:
                 {rulesExpanded && (
                   <Text style={s.rulesText}>{selectedStrategy.description}</Text>
                 )}
-              </TouchableOpacity>
+              </PressFix>
             ) : null}
 
             {checklistItems.length > 0 && (
               <View style={s.checklistSection}>
                 <Text style={s.checklistSectionTitle}>Checkliste</Text>
                 {checklistItems.map(item => (
-                  <TouchableOpacity
+                  <PressFix
                     key={item.id}
                     style={s.checklistRow}
                     onPress={() => toggleChecked(item.id)}
-                    activeOpacity={0.7}
                   >
                     <Feather
                       name={checkedItems.has(item.id) ? 'check-square' : 'square'}
@@ -579,7 +579,7 @@ Bewerte auf Deutsch:
                         <Text style={s.catBadgeText}>{item.category}</Text>
                       </View>
                     ) : null}
-                  </TouchableOpacity>
+                  </PressFix>
                 ))}
               </View>
             )}
@@ -594,13 +594,13 @@ Bewerte auf Deutsch:
             { value: 'visual_backtest', label: 'Backtest' },
             { value: 'managed_live', label: 'Live (managed)' },
           ] as const).map(q => (
-            <TouchableOpacity
+            <PressFix
               key={q.value}
               style={[s.option, form.trade_data_quality === q.value && s.optionActive]}
               onPress={() => update('trade_data_quality', q.value)}
             >
               <Text style={[s.optionText, form.trade_data_quality === q.value && s.optionTextActive]}>{q.label}</Text>
-            </TouchableOpacity>
+            </PressFix>
           ))}
         </View>
 
@@ -611,10 +611,10 @@ Bewerte auf Deutsch:
           onTimeChange={v => update('trade_time', v)}
         />
         {!!form.entry_price && !!form.symbol && (
-          <TouchableOpacity style={s.candleBtn} onPress={() => setShowCandlePicker(true)}>
+          <PressFix style={s.candleBtn} onPress={() => setShowCandlePicker(true)}>
             <Feather name="clock" size={14} color="#3b82f6" />
             <Text style={s.candleBtnTxt}>Genauen Zeitpunkt aus Kerzen suchen</Text>
-          </TouchableOpacity>
+          </PressFix>
         )}
 
         <Label text="Setup" />
@@ -630,25 +630,25 @@ Bewerte auf Deutsch:
               <Feather name="check-circle" size={16} color="#22c55e" />
               <Text style={s.screenshotTextDone}>Screenshot {i + 1} ✓</Text>
             </View>
-            <TouchableOpacity onPress={() => { setScreenshotPaths(prev => prev.filter((_, j) => j !== i)); setKiPlanResult(null) }} style={{ padding: 8 }}>
+            <PressFix onPress={() => { setScreenshotPaths(prev => prev.filter((_, j) => j !== i)); setKiPlanResult(null) }} style={{ padding: 8 }}>
               <Feather name="x" size={16} color="#ef4444" />
-            </TouchableOpacity>
+            </PressFix>
           </View>
         ))}
         {screenshotPaths.length < 2 && (
-          <TouchableOpacity style={s.screenshotBtn} onPress={handlePickScreenshot} disabled={uploading}>
+          <PressFix style={s.screenshotBtn} onPress={handlePickScreenshot} disabled={uploading}>
             {uploading
               ? <ActivityIndicator size="small" color="#666" />
               : <Feather name="upload" size={16} color="#666" />}
             <Text style={s.screenshotText}>
               {uploading ? 'Lädt hoch...' : screenshotPaths.length === 0 ? 'Screenshot hochladen (optional)' : '2. Screenshot hinzufügen'}
             </Text>
-          </TouchableOpacity>
+          </PressFix>
         )}
 
         {selectedStrategy?.description && (
           <>
-            <TouchableOpacity
+            <PressFix
               style={[s.screenshotBtn, { borderColor: '#7c3aed33', marginTop: 8 }]}
               onPress={runKiPlanReview}
               disabled={kiPlanLoading}
@@ -659,7 +659,7 @@ Bewerte auf Deutsch:
               <Text style={[s.screenshotText, { color: '#7c3aed' }]}>
                 {kiPlanLoading ? 'KI bewertet...' : screenshotPaths.length > 0 ? 'Trade-Plan bewerten (mit Screenshot)' : 'Trade-Plan bewerten'}
               </Text>
-            </TouchableOpacity>
+            </PressFix>
             {kiPlanError && <Text style={{ color: '#ef4444', fontSize: 13, marginTop: 4 }}>{kiPlanError}</Text>}
             {kiPlanResult && (
               <ScrollView style={s.kiResultBox} nestedScrollEnabled>
@@ -669,10 +669,10 @@ Bewerte auf Deutsch:
                   if (line.trim() === '') return <View key={i} style={{ height: 5 }} />
                   return <Text key={i} style={s.kiText}>{line}</Text>
                 })}
-                <TouchableOpacity onPress={() => setKiPlanResult(null)} style={{ marginTop: 10, alignSelf: 'center', flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+                <PressFix onPress={() => setKiPlanResult(null)} style={{ marginTop: 10, alignSelf: 'center', flexDirection: 'row', gap: 4, alignItems: 'center' }}>
                   <Feather name="refresh-cw" size={12} color="#555" />
                   <Text style={{ color: '#555', fontSize: 12 }}>Neu bewerten</Text>
-                </TouchableOpacity>
+                </PressFix>
               </ScrollView>
             )}
           </>
@@ -689,7 +689,7 @@ Bewerte auf Deutsch:
                   </Text>
                   <View style={s.optionRow}>
                     {list.map(tag => (
-                      <TouchableOpacity
+                      <PressFix
                         key={tag.id}
                         style={[s.tagChip, selectedTagIds.includes(tag.id) && s.tagChipActive]}
                         onPress={() => toggleTag(tag.id)}
@@ -697,7 +697,7 @@ Bewerte auf Deutsch:
                         <Text style={[s.tagChipText, selectedTagIds.includes(tag.id) && s.tagChipTextActive]}>
                           {tag.name.replace(/_/g, ' ')}
                         </Text>
-                      </TouchableOpacity>
+                      </PressFix>
                     ))}
                   </View>
                 </View>
