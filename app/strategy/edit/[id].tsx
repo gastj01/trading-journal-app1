@@ -166,7 +166,7 @@ export default function EditStrategyScreen() {
 
         <Text style={s.label}>Beschreibung / Strategie-Regeln</Text>
         <TextInput
-          style={[s.input, { height: 160, textAlignVertical: 'top' }]}
+          style={[s.input, { minHeight: 160, textAlignVertical: 'top' }]}
           placeholderTextColor="#555"
           value={form.description}
           onChangeText={v => update('description', v)}

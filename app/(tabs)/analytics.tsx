@@ -770,7 +770,7 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
             </PressFix>
             {kiError && <Text style={s.kiError}>{kiError}</Text>}
             {kiAnalysis && (
-              <ScrollView style={s.kiResult} nestedScrollEnabled>
+              <View style={s.kiResult}>
                 {kiAnalysis.split('\n').map((line, i) => {
                   const isBold = line.startsWith('**') && line.includes('**', 2)
                   if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
@@ -781,7 +781,7 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
                   <Feather name="refresh-cw" size={12} color="#555" />
                   <Text style={s.kiRerunText}>Neu analysieren</Text>
                 </PressFix>
-              </ScrollView>
+              </View>
             )}
 
             {/* Auto-Tag & KI Review: alle Trades automatisch taggen */}
@@ -815,7 +815,7 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
             })()}
             {combinedError && <Text style={s.kiError}>{combinedError}</Text>}
             {combinedAnalysis && (
-              <ScrollView style={s.kiResult} nestedScrollEnabled>
+              <View style={s.kiResult}>
                 <Text style={[s.kiHeading, { color: '#38bdf8', marginBottom: 6 }]}>Regelwerk-Analyse</Text>
                 {combinedAnalysis.split('\n').map((line, i) => {
                   const isBold = line.startsWith('**') && line.includes('**', 2)
@@ -835,7 +835,7 @@ Erstelle auf Basis aller Kerzendaten${hasImages ? ' und der Screenshots' : ''} e
                     </Text>
                   </PressFix>
                 </View>
-              </ScrollView>
+              </View>
             )}
           </View>
         )}
@@ -1086,7 +1086,7 @@ const s = StyleSheet.create({
   kiBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1a1a2d', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#818cf833' },
   kiBtnText: { color: '#818cf8', fontSize: 14, fontWeight: '600', flex: 1 },
   kiError: { color: '#ef4444', fontSize: 13, marginTop: 8, fontStyle: 'italic' },
-  kiResult: { backgroundColor: '#111', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#1e1e1e', maxHeight: 500 },
+  kiResult: { backgroundColor: '#111', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#1e1e1e' },
   kiHeading: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 10, marginBottom: 2 },
   kiText: { color: '#bbb', fontSize: 13, lineHeight: 20 },
   kiRerun: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12, alignSelf: 'center' },

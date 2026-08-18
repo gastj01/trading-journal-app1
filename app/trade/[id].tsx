@@ -389,14 +389,14 @@ VORHANDENE TAGS: ${tagList}
         {trade.ki_notes && (
           <View style={s.section}>
             <Text style={s.sectionTitle}>KI Review</Text>
-            <ScrollView style={{ maxHeight: 400, backgroundColor: '#111', borderRadius: 10, padding: 10 }} nestedScrollEnabled>
+            <View style={{ backgroundColor: '#111', borderRadius: 10, padding: 10 }}>
               {trade.ki_notes.split('\n').map((line, i) => {
                 const isBold = line.startsWith('**') && line.includes('**', 2)
                 if (isBold) return <Text key={i} style={{ color: '#fff', fontSize: 13, fontWeight: '700', marginTop: 8, marginBottom: 2 }}>{line.replace(/\*\*/g, '')}</Text>
                 if (line.trim() === '') return <View key={i} style={{ height: 5 }} />
                 return <Text key={i} style={s.noteText}>{line}</Text>
               })}
-            </ScrollView>
+            </View>
           </View>
         )}
 

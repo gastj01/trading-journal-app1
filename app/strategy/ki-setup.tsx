@@ -249,5 +249,5 @@ const s = StyleSheet.create({
   content: { padding: 16, paddingBottom: 40, gap: 4 },
   label: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 4, marginTop: 12 },
   input: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, color: '#fff', fontSize: 15, borderWidth: 1, borderColor: '#2a2a2a' },
-  descInput: { height: 400, textAlignVertical: 'top', fontSize: 13, lineHeight: 20 },
+  descInput: { minHeight: 400, textAlignVertical: 'top', fontSize: 13, lineHeight: 20 },
 })
