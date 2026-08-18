@@ -79,7 +79,7 @@ export default function SettingsScreen() {
         <View style={s.section}>
           <Text style={s.sectionLabel}>Trading-Konten</Text>
           {accounts.map(acc => (
-            <PressFix key={acc.id} style={s.row}>
+            <PressFix key={acc.id} style={s.row} onPress={() => router.push(`/account/edit/${acc.id}`)}>
               <View style={s.rowLeft}>
                 <Text style={s.rowTitle}>{acc.name}</Text>
                 <Text style={s.rowSub}>{acc.account_type} · {acc.platform} · ${acc.initial_balance.toLocaleString()}</Text>
