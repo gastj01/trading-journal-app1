@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import {
-  View, Text, TouchableOpacity, Modal, ScrollView,
+  View, Text, Modal, ScrollView,
   ActivityIndicator, StyleSheet, TextInput, Alert,
 } from 'react-native'
 import { Feather } from '@expo/vector-icons'
 import { nowDateStr } from '../lib/datetime'
 import { findCandlesTouchingPrice, touchLabel, type TimeWindow, type TouchType, type CandleInterval } from '../lib/candlePicker'
 import type { Candle } from '../lib/binance'
+import { PressFix } from './PressFix'
 
 interface Props {
   visible: boolean
@@ -98,9 +99,9 @@ export function CandleTimePicker({ visible, symbol, price, side, initialDate, on
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={s.container}>
         <View style={s.header}>
-          <TouchableOpacity onPress={onClose} style={s.closeBtn}>
+          <PressFix onPress={onClose} style={s.closeBtn}>
             <Feather name="x" size={20} color="#aaa" />
-          </TouchableOpacity>
+          </PressFix>
           <Text style={s.title}>Zeitpunkt suchen</Text>
           <View style={{ width: 36 }} />
         </View>
@@ -125,38 +126,38 @@ export function CandleTimePicker({ visible, symbol, price, side, initialDate, on
           <Text style={s.label}>Tageszeit</Text>
           <View style={s.chipRow}>
             {TIME_WINDOWS.map(w => (
-              <TouchableOpacity key={w.key} style={[s.chip, timeWindow === w.key && s.chipOn]}
+              <PressFix key={w.key} style={[s.chip, timeWindow === w.key && s.chipOn]}
                 onPress={() => setTimeWindow(w.key)}>
                 <Text style={[s.chipTxt, timeWindow === w.key && s.chipTxtOn]}>{w.label}</Text>
-              </TouchableOpacity>
+              </PressFix>
             ))}
           </View>
 
           <Text style={s.label}>Zeitrahmen</Text>
           <View style={s.chipRow}>
             {INTERVALS.map(iv => (
-              <TouchableOpacity key={iv.key} style={[s.chip, interval === iv.key && s.chipOn]}
+              <PressFix key={iv.key} style={[s.chip, interval === iv.key && s.chipOn]}
                 onPress={() => setInterval(iv.key)}>
                 <Text style={[s.chipTxt, interval === iv.key && s.chipTxtOn]}>{iv.label}</Text>
-              </TouchableOpacity>
+              </PressFix>
             ))}
           </View>
 
           <Text style={s.label}>Berührungsart</Text>
           <View style={s.chipRow}>
             {TOUCH_TYPES.map(tt => (
-              <TouchableOpacity key={tt.key} style={[s.chip, touchType === tt.key && s.chipOn]}
+              <PressFix key={tt.key} style={[s.chip, touchType === tt.key && s.chipOn]}
                 onPress={() => setTouchType(tt.key)}>
                 <Text style={[s.chipTxt, touchType === tt.key && s.chipTxtOn]}>{tt.label}</Text>
-              </TouchableOpacity>
+              </PressFix>
             ))}
           </View>
 
-          <TouchableOpacity style={s.searchBtn} onPress={search} disabled={loading}>
+          <PressFix style={s.searchBtn} onPress={search} disabled={loading}>
             {loading
               ? <ActivityIndicator color="#000" size="small" />
               : <Text style={s.searchBtnTxt}>Kerzen suchen</Text>}
-          </TouchableOpacity>
+          </PressFix>
 
           {searched && results.length === 0 && (
             <View style={s.emptyBox}>
@@ -170,7 +171,7 @@ export function CandleTimePicker({ visible, symbol, price, side, initialDate, on
             const pp = pricePct(c)
             const label = touchLabel(c, price, side)
             return (
-              <TouchableOpacity key={i} style={s.card} onPress={() => { onSelect(c); onClose() }} activeOpacity={0.7}>
+              <PressFix key={i} style={s.card} onPress={() => { onSelect(c); onClose() }}>
                 <View style={s.cardLeft}>
                   <Text style={s.cardTime}>{fmt(c.openTime)}</Text>
                   <View style={s.bar}>
@@ -187,7 +188,7 @@ export function CandleTimePicker({ visible, symbol, price, side, initialDate, on
                   </View>
                 </View>
                 <Feather name="chevron-right" size={18} color="#444" />
-              </TouchableOpacity>
+              </PressFix>
             )
           })}
 
