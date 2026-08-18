@@ -97,7 +97,26 @@ class MainActivity : ReactActivity() {
     } catch (e: Exception) {
       "noid"
     }
-    return "%s#%s".format(view.javaClass.simpleName, idPart)
+    val loc = IntArray(2)
+    view.getLocationOnScreen(loc)
+    return "%s#%s %dx%d@%d,%d".format(view.javaClass.simpleName, idPart, view.width, view.height, loc[0], loc[1])
+  }
+
+  // Logs every direct child of the Activity's content view (its class,
+  // measured size and screen position) so we can see what RN thinks its own
+  // root surface's height is, independent of decorView/content's height -
+  // discriminates "RN's root is sized smaller than the visible window" from
+  // "root is sized correctly but touch targets deeper in the tree are stale".
+  private fun describeContentChildren(content: ViewGroup?): String {
+    if (content == null) return "none"
+    val parts = mutableListOf<String>()
+    for (i in 0 until content.childCount) {
+      val child = content.getChildAt(i)
+      val loc = IntArray(2)
+      child.getLocationOnScreen(loc)
+      parts.add("%s %dx%d@%d,%d".format(child.javaClass.simpleName, child.width, child.height, loc[0], loc[1]))
+    }
+    return if (parts.isEmpty()) "empty" else parts.joinToString(";")
   }
 
   override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
@@ -118,10 +137,11 @@ class MainActivity : ReactActivity() {
         val loc = IntArray(2)
         window.decorView.getLocationOnScreen(loc)
         val content = window.findViewById<ViewGroup>(android.R.id.content)
-        DiagState.gestureLog = "winXY=%d,%d decor %dx%d content %dx%d confCh=%d focusChanges=%d hit=%s\\n%s".format(
+        val rootDesc = describeContentChildren(content)
+        DiagState.gestureLog = "winXY=%d,%d decor %dx%d content %dx%d confCh=%d focusChanges=%d\\nhit=%s\\nroot=%s\\n%s".format(
           loc[0], loc[1], window.decorView.width, window.decorView.height,
           content?.width ?: -1, content?.height ?: -1,
-          DiagState.configChangedCount, DiagState.focusChangeCount, hitDesc, line
+          DiagState.configChangedCount, DiagState.focusChangeCount, hitDesc, rootDesc, line
         )
       } else {
         DiagState.gestureLog = DiagState.gestureLog + "\\n" + line
