@@ -554,10 +554,18 @@ export default function EditTradeScreen() {
         />
 
         <Text style={s.label}>Setup</Text>
-        <TextInput style={s.input} placeholderTextColor="#555" placeholder="z.B. HTF Zone + M5 Reaction" value={form.setup} onChangeText={v => update('setup', v)} />
+        <TextInput
+          style={[s.input, { minHeight: 80, textAlignVertical: 'top' }]}
+          placeholderTextColor="#555"
+          placeholder="z.B. HTF Zone + M5 Reaction"
+          value={form.setup}
+          onChangeText={v => update('setup', v)}
+          multiline
+          numberOfLines={3}
+        />
 
         <Text style={s.label}>Notizen</Text>
-        <TextInput style={[s.input, { height: 80, textAlignVertical: 'top' }]} placeholderTextColor="#555" value={form.notes} onChangeText={v => update('notes', v)} multiline numberOfLines={3} />
+        <TextInput style={[s.input, { minHeight: 80, textAlignVertical: 'top' }]} placeholderTextColor="#555" value={form.notes} onChangeText={v => update('notes', v)} multiline numberOfLines={3} />
 
         {filteredTags.length > 0 && (
           <>

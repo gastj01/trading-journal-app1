@@ -304,7 +304,7 @@ export default function EditStrategyScreen() {
             />
             <Text style={s.label}>Beschreibung (optional)</Text>
             <TextInput
-              style={[s.input, { height: 80, textAlignVertical: 'top' }]}
+              style={[s.input, { minHeight: 80, textAlignVertical: 'top' }]}
               placeholderTextColor="#555"
               value={newItem.description}
               onChangeText={v => setNewItem(p => ({ ...p, description: v }))}

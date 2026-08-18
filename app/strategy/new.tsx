@@ -82,7 +82,7 @@ export default function NewStrategyScreen() {
 
         <Text style={s.label}>Beschreibung</Text>
         <TextInput
-          style={[s.input, { height: 80, textAlignVertical: 'top' }]}
+          style={[s.input, { minHeight: 80, textAlignVertical: 'top' }]}
           placeholderTextColor="#555"
           placeholder="Optionale Beschreibung..."
           value={form.description}

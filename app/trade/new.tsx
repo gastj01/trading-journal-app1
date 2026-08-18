@@ -618,7 +618,7 @@ Bewerte auf Deutsch:
         )}
 
         <Label text="Setup" />
-        <Input value={form.setup} onChangeText={v => update('setup', v)} placeholder="z.B. HTF Zone + M5 Reaction" />
+        <Input value={form.setup} onChangeText={v => update('setup', v)} placeholder="z.B. HTF Zone + M5 Reaction" multiline numberOfLines={3} />
 
         <Label text="Notizen" />
         <Input value={form.notes} onChangeText={v => update('notes', v)} multiline numberOfLines={3} />
@@ -662,7 +662,7 @@ Bewerte auf Deutsch:
             </PressFix>
             {kiPlanError && <Text style={{ color: '#ef4444', fontSize: 13, marginTop: 4 }}>{kiPlanError}</Text>}
             {kiPlanResult && (
-              <ScrollView style={s.kiResultBox} nestedScrollEnabled>
+              <View style={s.kiResultBox}>
                 {kiPlanResult.split('\n').map((line, i) => {
                   const isBold = line.startsWith('**') && line.includes('**', 2)
                   if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
@@ -673,7 +673,7 @@ Bewerte auf Deutsch:
                   <Feather name="refresh-cw" size={12} color="#555" />
                   <Text style={{ color: '#555', fontSize: 12 }}>Neu bewerten</Text>
                 </PressFix>
-              </ScrollView>
+              </View>
             )}
           </>
         )}
@@ -735,7 +735,7 @@ function Label({ text }: { text: string }) {
 function Input({ multiline, numberOfLines, ...props }: React.ComponentProps<typeof TextInput>) {
   return (
     <TextInput
-      style={[s.input, multiline && { height: 80, textAlignVertical: 'top' }]}
+      style={[s.input, multiline && { minHeight: 80, textAlignVertical: 'top' }]}
       placeholderTextColor="#555"
       {...props}
       multiline={multiline}
@@ -797,7 +797,7 @@ const s = StyleSheet.create({
   screenshotBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, borderWidth: 1, borderColor: '#2a2a2a', marginTop: 4 },
   screenshotText: { color: '#666', fontSize: 14 },
   screenshotTextDone: { color: '#22c55e' },
-  kiResultBox: { backgroundColor: '#111', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#1e1e1e', maxHeight: 450 },
+  kiResultBox: { backgroundColor: '#111', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#1e1e1e' },
   kiHeading: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 10, marginBottom: 2 },
   kiText: { color: '#bbb', fontSize: 13, lineHeight: 20 },
 })
