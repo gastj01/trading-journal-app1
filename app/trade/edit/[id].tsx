@@ -253,6 +253,26 @@ export default function EditTradeScreen() {
     const riskPct = parseFloat(form.risk_percent)
     const riskAmount = accountBalance > 0 && !isNaN(riskPct) ? (accountBalance * riskPct) / 100 : null
 
+    // Closing a trade here (rather than via a logged tp_hit/sl_hit/manual_exit
+    // event in trade/manage/[id].tsx) previously always stamped "now" as
+    // closed_at when none existed yet - for a trade that sat open for weeks
+    // before finally being marked closed here, that fabricates a multi-week
+    // hold time that never really happened. The trade's own management
+    // events (if any were logged) know the real exit time - use the latest
+    // closing-type event's timestamp when available, only falling back to
+    // "now" if no such event exists at all.
+    let closedAt: string | null = form.status === 'closed' ? (trade?.closed_at ?? null) : null
+    if (form.status === 'closed' && !closedAt) {
+      const { data: closingEvents } = await supabase
+        .from('trade_management_events')
+        .select('event_time')
+        .eq('trade_id', id)
+        .in('event_type', ['tp_hit', 'sl_hit', 'manual_exit', 'partial_close'])
+        .order('event_time', { ascending: false })
+        .limit(1)
+      closedAt = closingEvents?.[0]?.event_time ?? new Date().toISOString()
+    }
+
     setSaving(true)
     const { error } = await supabase.from('trades').update({
       symbol: form.symbol.toUpperCase(),
@@ -271,7 +291,7 @@ export default function EditTradeScreen() {
       position_size: form.position_size ? parseFloat(form.position_size) : null,
       strategy_id: form.strategy_id || null,
       opened_at: form.opened_at_date ? parseDateTimeToISO(form.opened_at_date, form.opened_at_time) : trade?.opened_at,
-      closed_at: form.status === 'closed' ? (trade?.closed_at ?? new Date().toISOString()) : null,
+      closed_at: closedAt,
     }).eq('id', id)
 
     if (error) {
