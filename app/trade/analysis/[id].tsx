@@ -46,7 +46,11 @@ export default function TradeAnalysisScreen() {
       ])
       const loadedEvents: ManagementEvent[] = evData ?? []
       setEvents(loadedEvents)
-      if (!t) return
+      if (!t) {
+        setError('Trade nicht gefunden.')
+        setPhase('error')
+        return
+      }
       setTrade(t)
       const loadedTags = (tagAssign ?? []).map((a: any) => a.tag).filter(Boolean)
       setTags(loadedTags)
@@ -246,9 +250,15 @@ export default function TradeAnalysisScreen() {
         {phase === 'error' && (
           <View style={s.errorBox}>
             <Text style={s.errorText}>{error}</Text>
-            <PressFix onPress={resetToPrompt} style={s.retryBtn}>
-              <Text style={s.retryText}>Zurück zum Prompt</Text>
-            </PressFix>
+            {trade ? (
+              <PressFix onPress={resetToPrompt} style={s.retryBtn}>
+                <Text style={s.retryText}>Zurück zum Prompt</Text>
+              </PressFix>
+            ) : (
+              <PressFix onPress={() => router.back()} style={s.retryBtn}>
+                <Text style={s.retryText}>Zurück</Text>
+              </PressFix>
+            )}
           </View>
         )}
 

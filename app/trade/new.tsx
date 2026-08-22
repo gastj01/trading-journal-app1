@@ -350,13 +350,14 @@ Bewerte auf Deutsch:
     }
 
     if (selectedTagIds.length > 0 && tradeData) {
-      await supabase.from('trade_tag_assignments').insert(
+      const { error: tagErr } = await supabase.from('trade_tag_assignments').insert(
         selectedTagIds.map(tag_id => ({ tag_id, trade_id: tradeData.id, user_id: user.id }))
       )
+      if (tagErr) Alert.alert('Warnung', `Trade gespeichert, aber Tags konnten nicht gesetzt werden: ${tagErr.message}`)
     }
 
     if (checklistItems.length > 0 && tradeData) {
-      await supabase.from('trade_checklist_responses').insert(
+      const { error: clErr } = await supabase.from('trade_checklist_responses').insert(
         checklistItems.map(item => ({
           user_id: user.id,
           trade_id: tradeData.id,
@@ -364,6 +365,7 @@ Bewerte auf Deutsch:
           status: checkedItems.has(item.id) ? 'checked' : 'unchecked',
         }))
       )
+      if (clErr) Alert.alert('Warnung', `Trade gespeichert, aber Checkliste konnte nicht gesetzt werden: ${clErr.message}`)
     }
 
     // TPs + BE trigger

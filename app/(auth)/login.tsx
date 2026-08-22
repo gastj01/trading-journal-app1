@@ -12,9 +12,14 @@ export default function LoginScreen() {
   async function handleLogin() {
     if (!email || !password) return
     setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    setLoading(false)
-    if (error) Alert.alert('Fehler', error.message)
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) Alert.alert('Fehler', error.message)
+    } catch (e: any) {
+      Alert.alert('Fehler', e?.message ?? 'Netzwerkfehler beim Anmelden.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (

@@ -5,16 +5,16 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../../src/lib/supabase'
-
-type AccountType = 'real' | 'demo' | 'funded'
+import type { AccountType } from '../../../src/types'
 
 export default function EditAccountScreen() {
   const router = useRouter()
   const { id } = useLocalSearchParams<{ id: string }>()
   const [saving, setSaving] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [form, setForm] = useState({
     name: '',
-    account_type: 'real' as AccountType,
+    account_type: 'live' as AccountType,
     platform: 'Bybit',
     initial_balance: '',
     default_risk_percent: '1',
@@ -25,11 +25,14 @@ export default function EditAccountScreen() {
   useEffect(() => {
     async function load() {
       if (!id) return
-      const { data: acc } = await supabase.from('trading_accounts').select('*').eq('id', id).single()
-      if (!acc) return
+      const { data: acc, error } = await supabase.from('trading_accounts').select('*').eq('id', id).single()
+      if (error || !acc) {
+        setLoadError(error?.message ?? 'Konto nicht gefunden.')
+        return
+      }
       setForm({
         name: acc.name ?? '',
-        account_type: (acc.account_type ?? 'real') as AccountType,
+        account_type: (acc.account_type ?? 'live') as AccountType,
         platform: acc.platform ?? 'Bybit',
         initial_balance: String(acc.initial_balance ?? ''),
         default_risk_percent: String(acc.default_risk_percent ?? 1),
@@ -59,6 +62,13 @@ export default function EditAccountScreen() {
       default_leverage: parseFloat(form.default_leverage) || 1,
       is_default: form.is_default,
     }).eq('id', id)
+    // Nothing enforces is_default exclusivity at the DB level - the
+    // dashboard's account query relies on exactly one default account
+    // existing (.single()), which errors on 2+ matches.
+    if (!error && form.is_default) {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) await supabase.from('trading_accounts').update({ is_default: false }).eq('user_id', user.id).neq('id', id)
+    }
     setSaving(false)
     if (error) Alert.alert('Fehler', error.message)
     else router.back()
@@ -71,12 +81,15 @@ export default function EditAccountScreen() {
           <Feather name="x" size={20} color="#aaa" />
         </PressFix>
         <Text style={s.title}>Konto bearbeiten</Text>
-        <PressFix onPress={handleSave} disabled={saving} style={s.saveBtn}>
+        <PressFix onPress={handleSave} disabled={saving || !!loadError} style={s.saveBtn}>
           <Text style={s.saveBtnText}>{saving ? '...' : 'Speichern'}</Text>
         </PressFix>
       </View>
 
       <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+        {loadError && (
+          <Text style={s.errorText}>Konto konnte nicht geladen werden: {loadError}</Text>
+        )}
         <Text style={s.label}>Name *</Text>
         <TextInput
           style={s.input}
@@ -88,14 +101,14 @@ export default function EditAccountScreen() {
 
         <Text style={s.label}>Kontotyp</Text>
         <View style={s.optionRow}>
-          {(['real', 'demo', 'funded'] as AccountType[]).map(t => (
+          {(['live', 'demo', 'prop', 'backtest'] as AccountType[]).map(t => (
             <PressFix
               key={t}
               style={[s.option, form.account_type === t && s.optionActive]}
               onPress={() => update('account_type', t)}
             >
               <Text style={[s.optionText, form.account_type === t && s.optionTextActive]}>
-                {t === 'real' ? 'Real' : t === 'demo' ? 'Demo' : 'Funded'}
+                {t === 'live' ? 'Live' : t === 'demo' ? 'Demo' : t === 'prop' ? 'Prop' : 'Backtest'}
               </Text>
             </PressFix>
           ))}
@@ -169,6 +182,7 @@ const s = StyleSheet.create({
   scroll: { flex: 1 },
   content: { padding: 16, paddingBottom: 60, gap: 4 },
   label: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 4, marginTop: 12 },
+  errorText: { color: '#ef4444', fontSize: 13, marginBottom: 8 },
   input: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, color: '#fff', fontSize: 15, borderWidth: 1, borderColor: '#2a2a2a' },
   row2: { flexDirection: 'row', gap: 8 },
   optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },

@@ -5,15 +5,14 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
-
-type AccountType = 'real' | 'demo' | 'funded'
+import type { AccountType } from '../../src/types'
 
 export default function NewAccountScreen() {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     name: '',
-    account_type: 'real' as AccountType,
+    account_type: 'live' as AccountType,
     platform: 'Bybit',
     initial_balance: '',
     default_risk_percent: '1',
@@ -33,7 +32,15 @@ export default function NewAccountScreen() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     setSaving(true)
-    const { error } = await supabase.from('trading_accounts').insert({
+    // Nothing enforces is_default exclusivity at the DB level. The
+    // dashboard's account query relies on exactly one default account
+    // existing (.single()), which errors on 0 or 2+ matches - so the first
+    // account ever created is always forced to default, and marking this
+    // one default unsets it on every other account for this user.
+    const { data: existingAccounts } = await supabase.from('trading_accounts').select('id').eq('user_id', user.id)
+    const isFirstAccount = (existingAccounts?.length ?? 0) === 0
+    const isDefault = form.is_default || isFirstAccount
+    const { data: created, error } = await supabase.from('trading_accounts').insert({
       user_id: user.id,
       name: form.name.trim(),
       account_type: form.account_type,
@@ -41,9 +48,12 @@ export default function NewAccountScreen() {
       initial_balance: parseFloat(form.initial_balance) || 0,
       default_risk_percent: parseFloat(form.default_risk_percent) || 1,
       default_leverage: parseFloat(form.default_leverage) || 1,
-      is_default: form.is_default,
+      is_default: isDefault,
       is_active: true,
-    })
+    }).select().single()
+    if (!error && isDefault && created) {
+      await supabase.from('trading_accounts').update({ is_default: false }).eq('user_id', user.id).neq('id', created.id)
+    }
     setSaving(false)
     if (error) Alert.alert('Fehler', error.message)
     else router.back()
@@ -73,14 +83,14 @@ export default function NewAccountScreen() {
 
         <Text style={s.label}>Kontotyp</Text>
         <View style={s.optionRow}>
-          {(['real', 'demo', 'funded'] as AccountType[]).map(t => (
+          {(['live', 'demo', 'prop', 'backtest'] as AccountType[]).map(t => (
             <PressFix
               key={t}
               style={[s.option, form.account_type === t && s.optionActive]}
               onPress={() => update('account_type', t)}
             >
               <Text style={[s.optionText, form.account_type === t && s.optionTextActive]}>
-                {t === 'real' ? 'Real' : t === 'demo' ? 'Demo' : 'Funded'}
+                {t === 'live' ? 'Live' : t === 'demo' ? 'Demo' : t === 'prop' ? 'Prop' : 'Backtest'}
               </Text>
             </PressFix>
           ))}

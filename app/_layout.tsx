@@ -160,16 +160,25 @@ export default function RootLayout() {
         <SafeAreaProvider>
           <ErrorBoundary>
             <StatusBar style="light" />
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="(auth)" />
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen name="trade/[id]" options={{ presentation: 'card' }} />
-              <Stack.Screen name="trade/new" options={{ presentation: 'card' }} />
-              <Stack.Screen name="strategy/new" options={{ presentation: 'card' }} />
-              <Stack.Screen name="trade/edit/[id]" options={{ presentation: 'card' }} />
-              <Stack.Screen name="trade/manage/[id]" options={{ presentation: 'card' }} />
-              <Stack.Screen name="account/new" options={{ presentation: 'card' }} />
-            </Stack>
+            {loading ? (
+              // Session check is still resolving - don't mount the Stack yet.
+              // Deep-linking straight into a protected route (e.g. from a
+              // push notification) would otherwise render that screen and
+              // let it start querying Supabase with no session, before the
+              // redirect effect above even gets a chance to run.
+              <View style={{ flex: 1, backgroundColor: '#0f0f0f' }} />
+            ) : (
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="(auth)" />
+                <Stack.Screen name="(tabs)" />
+                <Stack.Screen name="trade/[id]" options={{ presentation: 'card' }} />
+                <Stack.Screen name="trade/new" options={{ presentation: 'card' }} />
+                <Stack.Screen name="strategy/new" options={{ presentation: 'card' }} />
+                <Stack.Screen name="trade/edit/[id]" options={{ presentation: 'card' }} />
+                <Stack.Screen name="trade/manage/[id]" options={{ presentation: 'card' }} />
+                <Stack.Screen name="account/new" options={{ presentation: 'card' }} />
+              </Stack>
+            )}
           </ErrorBoundary>
         </SafeAreaProvider>
       </SplitScreenDiag>

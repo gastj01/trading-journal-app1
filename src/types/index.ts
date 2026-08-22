@@ -1,6 +1,6 @@
 export type Side = 'long' | 'short'
 export type TradeStatus = 'open' | 'closed'
-export type AccountType = 'live' | 'prop' | 'backtest'
+export type AccountType = 'live' | 'demo' | 'prop' | 'backtest'
 export type TagType = 'mistake' | 'execution' | 'context'
 export type ManagementEventType =
   | 'limit_placed'

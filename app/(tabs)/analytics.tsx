@@ -24,6 +24,19 @@ const INTERVAL_MS: Record<string, number> = {
 
 const NEW_TRADES_THRESHOLD = 10
 
+// Explicit hour lists, not start/end ranges - the previous non-contiguous
+// ranges (0-7, 7-12, 13-20) silently left hour 12 and 20-23 UTC out of every
+// session breakdown and the KI coaching prompt. "Sonstige" catches the rest
+// so no trade's hour is ever dropped. Single shared source used by both the
+// UI section and runStrategyKI's prompt, which previously kept an
+// independent (and already slightly drifted) copy of the same ranges.
+const SESSIONS: { label: string; hours: number[]; color: string }[] = [
+  { label: 'Asian', hours: [0, 1, 2, 3, 4, 5, 6], color: '#818cf8' },
+  { label: 'London', hours: [7, 8, 9, 10, 11], color: '#f59e0b' },
+  { label: 'New York', hours: [13, 14, 15, 16, 17, 18, 19], color: '#22c55e' },
+  { label: 'Sonstige', hours: [12, 20, 21, 22, 23], color: '#6b7280' },
+]
+
 async function copyKiText(text: string, setCopied: (v: boolean) => void) {
   await Clipboard.setStringAsync(text)
   setCopied(true)
@@ -216,11 +229,6 @@ export default function AnalyticsScreen() {
   }, [filtered, managementEvents])
 
   const stats = calcStats(filtered, eventsByTradeId)
-  const sessions = [
-    { label: 'Asian', start: 0, end: 7, color: '#818cf8' },
-    { label: 'London', start: 7, end: 12, color: '#f59e0b' },
-    { label: 'New York', start: 13, end: 20, color: '#22c55e' },
-  ]
 
   const activeStrategy = selectedStrategy ? strategies.find(s => s.id === selectedStrategy) ?? null : null
 
@@ -242,13 +250,8 @@ export default function AnalyticsScreen() {
     setKiError(null)
     setKiAnalysis(null)
 
-    const sessions = [
-      { label: 'Asian', start: 0, end: 7 },
-      { label: 'London', start: 7, end: 12 },
-      { label: 'New York', start: 13, end: 20 },
-    ]
-    const sessionLines = sessions.map(sess => {
-      const t = filtered.filter(t => { const h = new Date(t.opened_at).getUTCHours(); return h >= sess.start && h < sess.end })
+    const sessionLines = SESSIONS.map(sess => {
+      const t = filtered.filter(t => sess.hours.includes(new Date(t.opened_at).getUTCHours()))
       const st = calcStats(t, eventsByTradeId)
       return `  ${sess.label}: ${t.length} Trades, ${st.winRate.toFixed(0)}% WR, ${st.totalR > 0 ? '+' : ''}${st.totalR.toFixed(1)}R`
     }).join('\n')
@@ -821,11 +824,8 @@ Antworte auf Deutsch:
 
         <View style={s.section}>
           <Text style={s.sectionTitle}>Session (UTC)</Text>
-          {sessions.map(sess => {
-            const sessTrades = filtered.filter(t => {
-              const h = new Date(t.opened_at).getUTCHours()
-              return h >= sess.start && h < sess.end
-            })
+          {SESSIONS.map(sess => {
+            const sessTrades = filtered.filter(t => sess.hours.includes(new Date(t.opened_at).getUTCHours()))
             const st = calcStats(sessTrades, eventsByTradeId)
             if (sessTrades.length === 0) return (
               <View key={sess.label} style={s.sessRow}>
