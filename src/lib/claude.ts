@@ -1,5 +1,6 @@
 import type { Trade, TagDefinition, StrategyProfile, ManagementEvent } from '../types'
 import type { MFEMAEResult } from './binance'
+import { calcWeightedR } from './tradeCalc'
 
 const EVENT_LABELS_DE: Record<string, string> = {
   sl_moved_to_be: 'SL → Break Even',
@@ -22,9 +23,11 @@ export function buildAnalysisPrompt(
   events?: ManagementEvent[],
 ): string {
   const risk = Math.abs(trade.entry_price - trade.stop_loss)
-  const rMultiple = trade.exit_price && risk > 0
-    ? ((trade.side === 'long' ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price) / risk)
-    : null
+  // calcWeightedR accounts for partial closes/BE moves via events, matching
+  // the R-multiple shown everywhere else in the app (trade detail banner,
+  // Analytics) - a naive exit-vs-entry diff disagreed for trades with
+  // partial fills.
+  const rMultiple = trade.exit_price != null ? calcWeightedR(trade, events ?? []) : null
 
   const tagNames = tags.map(t => `${t.tag_type}: ${t.name.replace(/_/g, ' ')}`).join(', ')
 

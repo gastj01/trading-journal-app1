@@ -23,19 +23,22 @@ export default function NewStrategyScreen() {
   }
 
   async function handleSave() {
+    if (saving) return
     if (!form.name.trim()) {
       Alert.alert('Fehler', 'Name ist ein Pflichtfeld.')
       return
     }
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
     setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setSaving(false); return }
+    const tp1ClosePct = parseFloat(form.tp1_close_percent)
+    const tp1RMultiple = parseFloat(form.default_tp1_r_multiple)
     const { error } = await supabase.from('strategy_profiles').insert({
       user_id: user.id,
       name: form.name.trim(),
       description: form.description.trim(),
-      tp1_close_percent: parseFloat(form.tp1_close_percent) || 50,
-      default_tp1_r_multiple: parseFloat(form.default_tp1_r_multiple) || 2,
+      tp1_close_percent: isNaN(tp1ClosePct) ? 50 : tp1ClosePct,
+      default_tp1_r_multiple: isNaN(tp1RMultiple) ? 2 : tp1RMultiple,
       move_remaining_to_be_after_tp1: form.move_remaining_to_be_after_tp1,
     })
     setSaving(false)

@@ -30,6 +30,7 @@ export default function TradeDetailScreen() {
   const [events, setEvents] = useState<ManagementEvent[]>([])
   const [tags, setTags] = useState<TagDefinition[]>([])
   const [checklistResponses, setChecklistResponses] = useState<ChecklistResponseWithItem[]>([])
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null)
   const [ohlcv, setOhlcv] = useState<MFEMAEResult | null>(null)
   const [ohlcvLoading, setOhlcvLoading] = useState(false)
   const [ohlcvError, setOhlcvError] = useState<string | null>(null)
@@ -57,6 +58,14 @@ export default function TradeDetailScreen() {
       if (user) {
         const { data: tdefs } = await supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id)
         setAllTagDefs(tdefs ?? [])
+      }
+
+      if (t?.screenshot_path) {
+        // Signed URL, not getPublicUrl - the trade-screenshots bucket is
+        // private (every other read path in this app already uses signed
+        // URLs), so a public URL 401/403s and the image never loads.
+        const { data: signed } = await supabase.storage.from('trade-screenshots').createSignedUrl(t.screenshot_path, 3600)
+        setScreenshotUrl(signed?.signedUrl ?? null)
       }
 
       if (t) loadOhlcv(t)
@@ -184,7 +193,10 @@ VORHANDENE TAGS: ${tagList}
       await supabase.from('trades').update({ ki_notes: parsed.ki_note }).eq('id', trade.id)
       setTrade({ ...trade, ki_notes: parsed.ki_note })
 
-      // Create new tags
+      // Create new tags. Captures the inserted rows directly from Supabase's
+      // response (with real ids) instead of relying on allTagDefs state,
+      // which wouldn't have re-rendered yet in this same function call.
+      let createdDefs: TagDefinition[] = []
       if (parsed.new_tags?.length) {
         const existing = new Set(allTagDefs.map((t: TagDefinition) => t.name.toLowerCase()))
         const toCreate = parsed.new_tags.filter((nt: any) => !existing.has(nt.name.toLowerCase()))
@@ -192,20 +204,32 @@ VORHANDENE TAGS: ${tagList}
           const { data: created } = await supabase.from('trade_tag_definitions')
             .insert(toCreate.map((nt: any) => ({ user_id: user.id, name: nt.name, tag_type: nt.type ?? 'context' })))
             .select()
-          if (created) setAllTagDefs(prev => [...prev, ...created])
+          if (created) {
+            createdDefs = created
+            setAllTagDefs(prev => [...prev, ...created])
+          }
         }
       }
 
-      // Assign existing + new tags
-      const allNames = new Set([...(parsed.existing_tags ?? []), ...(parsed.new_tags?.map((t: any) => t.name) ?? [])])
-      const updatedDefs = [...allTagDefs, ...((parsed.new_tags ?? []).map((nt: any) => ({ name: nt.name })))]
-      const toAssign = updatedDefs.filter((td: any) => allNames.has(td.name) && td.id)
+      // Assign existing + newly-created tags. Additive only - never deletes
+      // an assignment the AI didn't re-mention, since existing_tags is the
+      // model's best-effort recap, not a ground truth of what should remain
+      // assigned (a manually-set tag the model omits must not be lost).
+      const allDefsByName = new Map([...allTagDefs, ...createdDefs].map((td: TagDefinition) => [td.name.toLowerCase(), td]))
+      const wantedNames = new Set<string>([
+        ...((parsed.existing_tags ?? []) as string[]).map(n => n.toLowerCase()),
+        ...((parsed.new_tags ?? []) as any[]).map(nt => nt.name.toLowerCase()),
+      ])
+      const alreadyAssignedIds = new Set(tags.map(t => t.id))
+      const toAssign = [...wantedNames]
+        .map(name => allDefsByName.get(name))
+        .filter((td): td is TagDefinition => !!td && !alreadyAssignedIds.has(td.id))
+
       if (toAssign.length) {
-        await supabase.from('trade_tag_assignments').delete().eq('trade_id', trade.id)
-        await supabase.from('trade_tag_assignments').insert(
-          toAssign.map((td: any) => ({ trade_id: trade.id, tag_id: td.id, user_id: user.id }))
+        const { error: assignErr } = await supabase.from('trade_tag_assignments').insert(
+          toAssign.map(td => ({ trade_id: trade.id, tag_id: td.id, user_id: user.id }))
         )
-        setTags(toAssign as TagDefinition[])
+        if (!assignErr) setTags(prev => [...prev, ...toAssign])
       }
 
       setKiSaved(true)
@@ -234,6 +258,7 @@ VORHANDENE TAGS: ${tagList}
   const rRaw = trade.exit_price != null ? calcWeightedR(trade, events) : null
   const rMultiple = rRaw != null ? rRaw.toFixed(2) : null
   const isWin = rRaw != null ? rRaw > 0 : false
+  const isBreakeven = rRaw === 0
 
   return (
     <SafeAreaView style={s.safe}>
@@ -268,11 +293,11 @@ VORHANDENE TAGS: ${tagList}
 
       <ScrollView style={s.scroll} contentContainerStyle={s.content}>
         {trade.status === 'closed' && rMultiple && (
-          <View style={[s.banner, isWin ? s.winBanner : s.lossBanner]}>
-            <Text style={[s.bannerR, isWin ? s.green : s.red]}>
+          <View style={[s.banner, isWin ? s.winBanner : isBreakeven ? s.beBanner : s.lossBanner]}>
+            <Text style={[s.bannerR, isWin ? s.green : isBreakeven ? s.orange : s.red]}>
               {parseFloat(rMultiple) > 0 ? '+' : ''}{rMultiple}R
             </Text>
-            <Text style={[s.bannerLabel, isWin ? s.green : s.red]}>{isWin ? 'WIN' : 'LOSS'}</Text>
+            <Text style={[s.bannerLabel, isWin ? s.green : isBreakeven ? s.orange : s.red]}>{isWin ? 'WIN' : isBreakeven ? 'BE' : 'LOSS'}</Text>
           </View>
         )}
         {trade.status === 'open' && (
@@ -286,7 +311,7 @@ VORHANDENE TAGS: ${tagList}
           <View style={s.priceGrid}>
             <PriceBox label="Entry" value={trade.entry_price} />
             <PriceBox label="Stop Loss" value={trade.stop_loss} negative />
-            {trade.exit_price && <PriceBox label="Exit" value={trade.exit_price} positive={isWin} negative={!isWin} />}
+            {trade.exit_price != null && <PriceBox label="Exit" value={trade.exit_price} positive={isWin} negative={!isWin && !isBreakeven} />}
             {trade.break_even && <PriceBox label="Break Even" value={trade.entry_price} />}
           </View>
         </View>
@@ -317,7 +342,7 @@ VORHANDENE TAGS: ${tagList}
                 <View style={[s.tpDot, tp.filled ? s.filledDot : s.unfilledDot]} />
                 <Text style={s.tpLabel}>{tp.label}</Text>
                 <Text style={s.tpPrice}>{tp.target_price.toLocaleString()}</Text>
-                <Text style={s.tpPct}>{tp.quantity_percent}%</Text>
+                <Text style={s.tpPct}>{Math.round(tp.quantity_percent * 100)}%</Text>
                 {tp.filled && <Text style={s.tpFilled}>✓</Text>}
               </View>
             ))}
@@ -468,11 +493,11 @@ VORHANDENE TAGS: ${tagList}
           )}
         </View>
 
-        {trade.screenshot_path && (
+        {trade.screenshot_path && screenshotUrl && (
           <View style={s.section}>
             <Text style={s.sectionTitle}>Screenshot</Text>
             <Image
-              source={{ uri: supabase.storage.from('trade-screenshots').getPublicUrl(trade.screenshot_path).data.publicUrl }}
+              source={{ uri: screenshotUrl }}
               style={s.screenshot}
               resizeMode="contain"
             />
@@ -539,6 +564,7 @@ const s = StyleSheet.create({
   banner: { borderRadius: 12, padding: 20, alignItems: 'center', marginBottom: 16 },
   winBanner: { backgroundColor: '#052e16', borderWidth: 1, borderColor: '#22c55e33' },
   lossBanner: { backgroundColor: '#2d0a0a', borderWidth: 1, borderColor: '#ef444433' },
+  beBanner: { backgroundColor: '#2d1f0a', borderWidth: 1, borderColor: '#f59e0b33' },
   bannerR: { fontSize: 36, fontWeight: '700' },
   bannerLabel: { fontSize: 14, fontWeight: '600', marginTop: 4 },
   openBanner: { backgroundColor: '#1a1a00', borderRadius: 10, padding: 12, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: '#f59e0b33' },
@@ -591,6 +617,7 @@ const s = StyleSheet.create({
   mfeValue: { color: '#22c55e', fontSize: 20, fontWeight: '700' },
   maeValue: { color: '#ef4444', fontSize: 20, fontWeight: '700' },
   mfePrice: { color: '#666', fontSize: 12, marginTop: 2 },
+  maePrice: { color: '#666', fontSize: 12, marginTop: 2 },
   mfeHint: { color: '#555', fontSize: 11, marginTop: 4 },
   captureRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', borderRadius: 8, padding: 10 },
   captureLabel: { color: '#666', fontSize: 13, flex: 1 },

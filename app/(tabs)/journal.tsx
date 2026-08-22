@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
+import { PressFix } from '../../src/components/PressFix'
 import { calcWeightedR } from '../../src/lib/tradeCalc'
 import { tapDiag } from '../../src/lib/tapDiag'
 import type { Trade, StrategyProfile, TagDefinition, ManagementEvent } from '../../src/types'
@@ -194,9 +195,13 @@ export default function JournalScreen() {
         }
       />
 
-      <TouchableOpacity style={s.fab} onPress={() => router.push('/trade/new')}>
+      {/* Split-screen touch bug fix: PressFix, not TouchableOpacity, for this
+          primary add-trade action - see AGENTS.md and the equivalent
+          Dashboard/trade-new "+"/Speichern fixes. This one was missed in
+          the original conversion pass. */}
+      <PressFix style={s.fab} onPress={() => router.push('/trade/new')}>
         <Feather name="plus" size={24} color="#000" />
-      </TouchableOpacity>
+      </PressFix>
     </SafeAreaView>
   )
 }

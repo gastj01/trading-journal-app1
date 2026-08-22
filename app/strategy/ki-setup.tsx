@@ -117,13 +117,14 @@ Halte es kompakt und präzise. Keine Einleitung, keine Zusammenfassung.`
   }
 
   async function handleSave() {
+    if (saving) return
     if (!stratName.trim()) {
       Alert.alert('Fehler', 'Bitte einen Namen eingeben.')
       return
     }
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
     setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setSaving(false); return }
     const { error } = await supabase.from('strategy_profiles').insert({
       user_id: user.id,
       name: stratName.trim(),

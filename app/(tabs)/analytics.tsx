@@ -158,9 +158,10 @@ export default function AnalyticsScreen() {
       const trade = tradeMap.get(a.trade_id)
       if (!trade || !trade.exit_price || !stats[a.tag_id]) continue
       const r = calcWeightedR(trade, eventsByTradeId.get(trade.id) ?? []) ?? 0
-      const isWin = r > 0
       stats[a.tag_id].total++
-      if (isWin) stats[a.tag_id].inWin++; else stats[a.tag_id].inLoss++
+      // r === 0 is a breakeven, not a loss - leave it out of both buckets.
+      if (r > 0) stats[a.tag_id].inWin++
+      else if (r < 0) stats[a.tag_id].inLoss++
       stats[a.tag_id].rVals.push(r)
     }
     return Object.values(stats)
@@ -335,6 +336,7 @@ Direkt und präzise. Kein Intro.`
   ): Promise<{ notes: Map<string, string>; failed: Trade[] }> {
     const notes = new Map<string, string>()
     const failed: Trade[] = []
+    const newAssignments: TagAssignment[] = []
     if (tradesToTag.length === 0) return { notes, failed }
 
     const tagList = tagDefs.map(t => `${t.tag_type}: ${t.name}`).join(', ') || 'Keine Tags vorhanden'
@@ -396,14 +398,21 @@ ${tradeBlocks.join('\n\n---\n\n')}
           }
         }
 
-        // Assign tags
+        // Assign tags. Additive only - never deletes an assignment the AI
+        // didn't re-mention (existing_tags is the model's best-effort
+        // recap, not ground truth of what should remain assigned; a
+        // manually-set or previously auto-set tag it omits must not be
+        // lost). Matches the single-trade KI review fix in trade/[id].tsx.
         const allNames = new Set([...(result.existing_tags ?? []), ...(result.new_tags?.map((t: any) => t.name) ?? [])])
-        const toAssign = currentTagDefs.filter((td: TagDefinition) => allNames.has(td.name))
+        const alreadyAssignedIds = new Set(
+          assignments.filter(a => a.trade_id === result.trade_id).map(a => a.tag_id)
+        )
+        const toAssign = currentTagDefs.filter((td: TagDefinition) => allNames.has(td.name) && !alreadyAssignedIds.has(td.id))
         if (toAssign.length) {
-          await supabase.from('trade_tag_assignments').delete().eq('trade_id', result.trade_id)
-          await supabase.from('trade_tag_assignments').insert(
+          const { error: assignErr } = await supabase.from('trade_tag_assignments').insert(
             toAssign.map((td: TagDefinition) => ({ trade_id: result.trade_id, tag_id: td.id, user_id: userId }))
           )
+          if (!assignErr) newAssignments.push(...toAssign.map((td: TagDefinition) => ({ trade_id: result.trade_id, tag_id: td.id })))
         }
 
         // Save ki_notes
@@ -422,6 +431,7 @@ ${tradeBlocks.join('\n\n---\n\n')}
 
     setTagDefs(currentTagDefs)
     setTrades(prev => prev.map(t => notes.has(t.id) ? { ...t, ki_notes: notes.get(t.id)! } : t))
+    if (newAssignments.length) setAssignments(prev => [...prev, ...newAssignments])
     return { notes, failed }
   }
 
@@ -1179,7 +1189,9 @@ function calcStats(trades: Trade[], eventsByTrade: Map<string, ManagementEvent[]
     return calcWeightedR(t, eventsByTrade.get(t.id) ?? []) ?? 0
   })
   const wins = trades.filter((_, i) => rValues[i] > 0)
-  const losses = trades.filter((t, i) => t.exit_price != null && rValues[i] <= 0)
+  // r === 0 is a genuine breakeven, not a loss - only exit_price != null and
+  // r < 0 counts as a loss (trades without exit_price stay 0/neither).
+  const losses = trades.filter((t, i) => t.exit_price != null && rValues[i] < 0)
   const totalR = rValues.reduce((a, b) => a + b, 0)
   const avgR = trades.length > 0 ? totalR / trades.length : 0
   const grossWin = rValues.filter(r => r > 0).reduce((a, b) => a + b, 0)

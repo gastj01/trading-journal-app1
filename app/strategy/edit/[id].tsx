@@ -82,11 +82,13 @@ export default function EditStrategyScreen() {
       return
     }
     setSaving(true)
+    const tp1ClosePct = parseFloat(form.tp1_close_percent)
+    const tp1RMultiple = parseFloat(form.default_tp1_r_multiple)
     const { error } = await supabase.from('strategy_profiles').update({
       name: form.name.trim(),
       description: form.description.trim(),
-      tp1_close_percent: parseFloat(form.tp1_close_percent) || 50,
-      default_tp1_r_multiple: parseFloat(form.default_tp1_r_multiple) || 2,
+      tp1_close_percent: isNaN(tp1ClosePct) ? 50 : tp1ClosePct,
+      default_tp1_r_multiple: isNaN(tp1RMultiple) ? 2 : tp1RMultiple,
       move_remaining_to_be_after_tp1: form.move_remaining_to_be_after_tp1,
       default_timeframe: form.default_timeframe,
     }).eq('id', id)

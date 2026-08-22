@@ -5,12 +5,14 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../src/lib/supabase'
 import { tapDiag } from '../../src/lib/tapDiag'
-import type { Trade, TradingAccount } from '../../src/types'
+import { calcWeightedR } from '../../src/lib/tradeCalc'
+import type { Trade, TradingAccount, ManagementEvent } from '../../src/types'
 
 export default function DashboardScreen() {
   const router = useRouter()
   const [trades, setTrades] = useState<Trade[]>([])
   const [account, setAccount] = useState<TradingAccount | null>(null)
+  const [managementEvents, setManagementEvents] = useState<ManagementEvent[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [addBtnPressed, setAddBtnPressed] = useState(false)
   const addBtnRef = useRef<View>(null)
@@ -25,13 +27,15 @@ export default function DashboardScreen() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const [{ data: accs }, { data: trd }] = await Promise.all([
+    const [{ data: accs }, { data: trd }, { data: evData }] = await Promise.all([
       supabase.from('trading_accounts').select('*').eq('user_id', user.id).eq('is_default', true).single(),
       supabase.from('trades').select('*').eq('user_id', user.id).order('opened_at', { ascending: false }).limit(100),
+      supabase.from('trade_management_events').select('*').eq('user_id', user.id),
     ])
 
     setAccount(accs)
     setTrades(trd ?? [])
+    setManagementEvents(evData ?? [])
   }
 
   useEffect(() => { load() }, [])
@@ -42,24 +46,23 @@ export default function DashboardScreen() {
     setRefreshing(false)
   }
 
+  const eventsByTradeId = new Map<string, ManagementEvent[]>()
+  for (const ev of managementEvents) {
+    if (!eventsByTradeId.has(ev.trade_id)) eventsByTradeId.set(ev.trade_id, [])
+    eventsByTradeId.get(ev.trade_id)!.push(ev)
+  }
+
   const closed = trades.filter(t => t.status === 'closed')
   const open = trades.filter(t => t.status === 'open')
-  const wins = closed.filter(t => t.exit_price != null && (
-    t.side === 'long' ? t.exit_price > t.entry_price : t.exit_price < t.entry_price
-  ))
+  // Same weighted-R math as Analytics (accounts for partial closes/BE moves
+  // via trade_management_events) so the two tabs agree on the same trades -
+  // a raw entry-vs-exit comparison ignored partials entirely.
+  const rValues = closed.map(t => t.exit_price != null ? calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0 : 0)
+  const wins = closed.filter((_, i) => rValues[i] > 0)
   const winRate = closed.length > 0 ? (wins.length / closed.length) * 100 : 0
+  const totalR = rValues.reduce((a, b) => a + b, 0)
 
-  const totalR = closed.reduce((sum, t) => {
-    if (!t.exit_price) return sum
-    const risk = Math.abs(t.entry_price - t.stop_loss)
-    if (risk === 0) return sum
-    const diff = t.side === 'long'
-      ? t.exit_price - t.entry_price
-      : t.entry_price - t.exit_price
-    return sum + diff / risk
-  }, 0)
-
-  const recent = trades.slice(0, 5)
+  const recent = trades.filter(t => t.status === 'closed').slice(0, 5)
 
   return (
     <SafeAreaView style={s.safe}>
@@ -142,7 +145,7 @@ export default function DashboardScreen() {
         {/* Recent Trades */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Letzte Trades</Text>
-          {recent.filter(t => t.status === 'closed').map(t => (
+          {recent.map(t => (
             <TradeRow key={t.id} trade={t} onPress={() => router.push(`/trade/${t.id}`)} />
           ))}
         </View>

@@ -34,6 +34,7 @@ const INTERVAL_MAP: Record<string, string> = {
 
 export function normalizeSymbol(symbol: string): string {
   const s = symbol.toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (s === 'BTC' || s === 'ETH' || s === 'BNB') return s + 'USDT'
   if (/USDT$|USDC$|BUSD$|BTC$|ETH$|BNB$/.test(s)) return s
   return s + 'USDT'
 }
@@ -177,11 +178,11 @@ export function detectManagementEvents(
     const slHit = side === 'long' ? c.low <= currentSL : c.high >= currentSL
     if (slHit) {
       events.push({
-        event_type: beTriggered ? 'sl_hit' : 'sl_hit',
+        event_type: 'sl_hit',
         event_time: time,
         price: currentSL,
         size_percent: null,
-        note: 'Automatisch aus Kerzen erkannt',
+        note: beTriggered ? 'Automatisch aus Kerzen erkannt (nach Break Even)' : 'Automatisch aus Kerzen erkannt',
       })
       slTriggered = true
     }

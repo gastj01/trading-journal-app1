@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   View, Text, ScrollView, TextInput,
   StyleSheet, Alert, Modal, KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -57,6 +57,23 @@ function actionFor(eventType: string): ActionDef {
   return ACTIONS.find(a => a.key === eventType) ?? ACTIONS[6]
 }
 
+// Checks every TP target has its own distinct hit price within tolerance -
+// a plain "some hit price is close to this target" check per target let one
+// recorded price satisfy two nearby targets (e.g. TP1=50000, TP2=50040),
+// closing the trade after only one of the two was actually filled. Matches
+// each hit price to at most one target (greedy nearest-first).
+function allTpTargetsHit(tpTargets: { target_price: number }[], hitPrices: number[]): boolean {
+  if (tpTargets.length === 0) return false
+  const remaining = [...hitPrices]
+  for (const tp of tpTargets) {
+    const tolerance = Math.max(tp.target_price * 0.001, 0.01)
+    const idx = remaining.findIndex(hp => Math.abs(hp - tp.target_price) < tolerance)
+    if (idx === -1) return false
+    remaining.splice(idx, 1)
+  }
+  return true
+}
+
 export default function ManageTradeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
@@ -113,6 +130,20 @@ export default function ManageTradeScreen() {
   }, [id])
 
   useEffect(() => { if (id) loadData() }, [id, loadData])
+
+  // Effective SL after any logged BE/manual SL moves - shared by the render
+  // section and handleDetectFromCandles, so candle-based detection starts
+  // from the same current stop the UI already shows, not the original DB
+  // stop_loss (which would miss an already-hit BE stop after a manual move).
+  const currentSL = useMemo(() => {
+    if (!trade) return 0
+    let sl = trade.stop_loss
+    for (const ev of [...events].reverse()) {
+      if (ev.event_type === 'sl_moved_to_be') sl = trade.entry_price
+      if (ev.event_type === 'sl_moved_manual') sl = ev.price
+    }
+    return sl
+  }, [events, trade])
 
   // ── New event ──────────────────────────────────────────────────────────────
 
@@ -189,9 +220,7 @@ export default function ManageTradeScreen() {
         .eq('event_type', 'tp_hit')
       const hitPrices = (freshTpEvents ?? []).map(ev => ev.price ?? 0)
       const tpTargets = partialProfits.filter(pp => pp.quantity_percent > 0)
-      const allPricesHit = tpTargets.length > 0 && tpTargets.every(tp =>
-        hitPrices.some(hp => Math.abs(hp - tp.target_price) < Math.max(tp.target_price * 0.001, 0.01))
-      )
+      const allPricesHit = allTpTargetsHit(tpTargets, hitPrices)
       const totalSizePct = (freshTpEvents ?? []).reduce((sum, ev) => sum + (ev.size_percent ?? 0), 0)
       isCumulativeClose = allPricesHit || totalSizePct >= 98
     }
@@ -271,8 +300,12 @@ export default function ManageTradeScreen() {
       const tpLevels = partialProfits
         .filter(pp => pp.quantity_percent > 0)
         .map(pp => ({ price: pp.target_price, quantity_percent: Math.round(pp.quantity_percent * 100) }))
-      const beTrigger = partialProfits.find(pp => pp.quantity_percent === 0)?.target_price
-      const detected = detectManagementEvents(candles, trade.entry_price, trade.stop_loss, trade.side, tpLevels, beTrigger)
+      // Skip re-detecting the BE trigger if a BE/manual SL move is already
+      // logged - currentSL already reflects it, so re-passing beTrigger would
+      // make detectManagementEvents emit a duplicate sl_moved_to_be event.
+      const beAlreadyLogged = events.some(ev => ev.event_type === 'sl_moved_to_be' || ev.event_type === 'sl_moved_manual')
+      const beTrigger = beAlreadyLogged ? undefined : partialProfits.find(pp => pp.quantity_percent === 0)?.target_price
+      const detected = detectManagementEvents(candles, trade.entry_price, currentSL, trade.side, tpLevels, beTrigger)
       if (detected.length === 0) { Alert.alert('Keine Events', 'SL und TPs wurden in diesem Zeitraum nicht getroffen.'); setDetecting(false); return }
       setDetectedEvents(detected)
       setSelectedDetected(new Set(detected.map((_, i) => i)))
@@ -303,10 +336,7 @@ export default function ManageTradeScreen() {
       const { data: allTpEvents } = await supabase.from('trade_management_events').select('price, size_percent').eq('trade_id', id).eq('event_type', 'tp_hit')
       const hitPrices = (allTpEvents ?? []).map(ev => ev.price ?? 0)
       const totalSizePct = (allTpEvents ?? []).reduce((s, ev) => s + (ev.size_percent ?? 0), 0)
-      const allHit = tpTargets.length > 0 && (
-        tpTargets.every(tp => hitPrices.some(hp => Math.abs(hp - tp.target_price) < Math.max(tp.target_price * 0.001, 0.01)))
-        || totalSizePct >= 98
-      )
+      const allHit = allTpTargetsHit(tpTargets, hitPrices) || totalSizePct >= 98
       if (allHit) {
         const lastTp = toSave.filter(e => e.event_type === 'tp_hit').at(-1)
         if (lastTp) closeEvent = lastTp
@@ -324,11 +354,8 @@ export default function ManageTradeScreen() {
   const risk = Math.abs(trade.entry_price - trade.stop_loss)
 
   const eventsAsc = [...events].reverse()
-  let currentSL = trade.stop_loss
   let remainingFraction = 1.0
   for (const ev of eventsAsc) {
-    if (ev.event_type === 'sl_moved_to_be') currentSL = trade.entry_price
-    if (ev.event_type === 'sl_moved_manual') currentSL = ev.price
     if ((ev.event_type === 'partial_close' || ev.event_type === 'tp_hit') && ev.size_percent)
       remainingFraction -= ev.size_percent / 100
   }

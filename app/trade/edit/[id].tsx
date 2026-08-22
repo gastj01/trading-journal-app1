@@ -247,6 +247,9 @@ export default function EditTradeScreen() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
+    const riskPct = parseFloat(form.risk_percent)
+    const riskAmount = accountBalance > 0 && !isNaN(riskPct) ? (accountBalance * riskPct) / 100 : null
+
     setSaving(true)
     const { error } = await supabase.from('trades').update({
       symbol: form.symbol.toUpperCase(),
@@ -256,12 +259,13 @@ export default function EditTradeScreen() {
       stop_loss: parseFloat(form.stop_loss),
       exit_price: form.exit_price ? parseFloat(form.exit_price) : null,
       status: form.status,
-      risk_percent: parseFloat(form.risk_percent),
+      risk_percent: riskPct,
+      risk_amount: riskAmount,
       setup: form.setup,
       notes: form.notes,
       screenshot_path: form.screenshot_path || null,
       trade_data_quality: form.trade_data_quality,
-      position_size: form.position_size ? parseFloat(form.position_size) : undefined,
+      position_size: form.position_size ? parseFloat(form.position_size) : null,
       strategy_id: form.strategy_id || null,
       opened_at: form.opened_at_date ? parseDateTimeToISO(form.opened_at_date, form.opened_at_time) : trade?.opened_at,
       closed_at: form.status === 'closed' ? (trade?.closed_at ?? new Date().toISOString()) : null,
@@ -273,17 +277,20 @@ export default function EditTradeScreen() {
       return
     }
 
-    await supabase.from('trade_tag_assignments').delete().eq('trade_id', id)
-    if (selectedTagIds.length > 0) {
-      await supabase.from('trade_tag_assignments').insert(
+    const { error: tagDeleteErr } = await supabase.from('trade_tag_assignments').delete().eq('trade_id', id)
+    if (tagDeleteErr) Alert.alert('Warnung', `Tags konnten nicht aktualisiert werden: ${tagDeleteErr.message}`)
+    else if (selectedTagIds.length > 0) {
+      const { error: tagInsertErr } = await supabase.from('trade_tag_assignments').insert(
         selectedTagIds.map(tag_id => ({ tag_id, trade_id: id, user_id: user.id }))
       )
+      if (tagInsertErr) Alert.alert('Warnung', `Tags konnten nicht gespeichert werden: ${tagInsertErr.message}`)
     }
 
     // Save checklist responses
-    await supabase.from('trade_checklist_responses').delete().eq('trade_id', id)
-    if (checklistItems.length > 0) {
-      await supabase.from('trade_checklist_responses').insert(
+    const { error: clDeleteErr } = await supabase.from('trade_checklist_responses').delete().eq('trade_id', id)
+    if (clDeleteErr) Alert.alert('Warnung', `Checkliste konnte nicht aktualisiert werden: ${clDeleteErr.message}`)
+    else if (checklistItems.length > 0) {
+      const { error: clInsertErr } = await supabase.from('trade_checklist_responses').insert(
         checklistItems.map(item => ({
           user_id: user.id,
           trade_id: id,
@@ -291,10 +298,17 @@ export default function EditTradeScreen() {
           status: checkedItems.has(item.id) ? 'checked' : 'unchecked',
         }))
       )
+      if (clInsertErr) Alert.alert('Warnung', `Checkliste konnte nicht gespeichert werden: ${clInsertErr.message}`)
     }
 
-    // Save TP levels (delete non-BE entries, reinsert)
-    await supabase.from('trade_partial_profits').delete().eq('trade_id', id).gt('quantity_percent', 0)
+    // Save TP levels: insert the new rows FIRST, only delete the old ones
+    // once that succeeds - if delete ran first and the insert then failed,
+    // previously-valid TP levels would be lost with only a misleading error.
+    // Old rows are deleted by id (captured before inserting) rather than by
+    // the quantity_percent>0 filter, so it can't also catch the rows just
+    // inserted above.
+    const { data: oldPP } = await supabase.from('trade_partial_profits').select('id').eq('trade_id', id).gt('quantity_percent', 0)
+    const oldPPIds = (oldPP ?? []).map((r: any) => r.id)
     const ppRows = tpLevels
       .filter(tp => {
         const p = parseFloat(tp.price); const q = parseFloat(tp.qty)
@@ -312,9 +326,12 @@ export default function EditTradeScreen() {
       const { error: ppError } = await supabase.from('trade_partial_profits').insert(ppRows)
       if (ppError) {
         setSaving(false)
-        Alert.alert('TP Fehler', ppError.message)
+        Alert.alert('TP Fehler', `${ppError.message} — bestehende TP-Level wurden NICHT verändert.`)
         return
       }
+    }
+    if (oldPPIds.length > 0) {
+      await supabase.from('trade_partial_profits').delete().in('id', oldPPIds)
     }
 
     setSaving(false)

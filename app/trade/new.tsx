@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native'
+import { View, Text, TextInput, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
@@ -198,7 +198,7 @@ export default function NewTradeScreen() {
     // Load pre-entry candles for context
     let candleText = ''
     try {
-      const interval = normalizeInterval(form.timeframe)
+      const interval = normalizeInterval(form.timeframe) ?? '5m'
       const entryMs = parseDateTimeToISO(form.trade_date, form.trade_time)
         ? new Date(parseDateTimeToISO(form.trade_date, form.trade_time)!).getTime()
         : Date.now()
@@ -427,13 +427,13 @@ Bewerte auf Deutsch:
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.closeBtn}>
+        <PressFix onPress={() => router.back()} style={s.closeBtn}>
           <Feather name="x" size={20} color="#aaa" />
-        </TouchableOpacity>
+        </PressFix>
         <Text style={s.title}>Neuer Trade</Text>
-        <TouchableOpacity onPress={handleSave} disabled={saving} style={s.saveBtn}>
+        <PressFix onPress={handleSave} disabled={saving} style={s.saveBtn}>
           <Text style={s.saveBtnText}>{saving ? '...' : 'Speichern'}</Text>
-        </TouchableOpacity>
+        </PressFix>
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -441,24 +441,24 @@ Bewerte auf Deutsch:
         <Label text="Konto" />
         <View style={s.optionRow}>
           {accounts.map(acc => (
-            <TouchableOpacity
+            <PressFix
               key={acc.id}
               style={[s.option, form.account_id === acc.id && s.optionActive]}
               onPress={() => update('account_id', acc.id)}
             >
               <Text style={[s.optionText, form.account_id === acc.id && s.optionTextActive]}>{acc.name}</Text>
-            </TouchableOpacity>
+            </PressFix>
           ))}
         </View>
 
         <Label text="Richtung" />
         <View style={s.optionRow}>
-          <TouchableOpacity style={[s.option, s.optionLong, form.side === 'long' && s.optionLongActive]} onPress={() => update('side', 'long')}>
+          <PressFix style={[s.option, s.optionLong, form.side === 'long' && s.optionLongActive]} onPress={() => update('side', 'long')}>
             <Text style={[s.optionText, form.side === 'long' && s.green]}>▲ LONG</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.option, s.optionShort, form.side === 'short' && s.optionShortActive]} onPress={() => update('side', 'short')}>
+          </PressFix>
+          <PressFix style={[s.option, s.optionShort, form.side === 'short' && s.optionShortActive]} onPress={() => update('side', 'short')}>
             <Text style={[s.optionText, form.side === 'short' && s.red]}>▼ SHORT</Text>
-          </TouchableOpacity>
+          </PressFix>
         </View>
 
         <View style={s.row2}>
