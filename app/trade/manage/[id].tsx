@@ -210,18 +210,21 @@ export default function ManageTradeScreen() {
     })
     if (error) { setSaving(false); Alert.alert('Fehler', error.message); return }
 
-    // Check if all TP price levels are now hit
+    // Check if all TP price levels are now hit, or the cumulative filled
+    // size (tp_hit + partial_close together, matching the remainingFraction
+    // calc below) reached 100% - a trade fully exited via partial_close
+    // events alone previously never auto-closed.
     let isCumulativeClose = false
-    if (activeAction.key === 'tp_hit') {
-      const { data: freshTpEvents } = await supabase
+    if (activeAction.key === 'tp_hit' || activeAction.key === 'partial_close') {
+      const { data: freshEvents } = await supabase
         .from('trade_management_events')
-        .select('price, size_percent')
+        .select('event_type, price, size_percent')
         .eq('trade_id', id)
-        .eq('event_type', 'tp_hit')
-      const hitPrices = (freshTpEvents ?? []).map(ev => ev.price ?? 0)
+        .in('event_type', ['tp_hit', 'partial_close'])
+      const hitPrices = (freshEvents ?? []).filter(ev => ev.event_type === 'tp_hit').map(ev => ev.price ?? 0)
       const tpTargets = partialProfits.filter(pp => pp.quantity_percent > 0)
       const allPricesHit = allTpTargetsHit(tpTargets, hitPrices)
-      const totalSizePct = (freshTpEvents ?? []).reduce((sum, ev) => sum + (ev.size_percent ?? 0), 0)
+      const totalSizePct = (freshEvents ?? []).reduce((sum, ev) => sum + (ev.size_percent ?? 0), 0)
       isCumulativeClose = allPricesHit || totalSizePct >= 98
     }
     const isClose = activeAction.closestrade || isCumulativeClose
@@ -264,9 +267,26 @@ export default function ManageTradeScreen() {
     }).eq('id', editingEvent.id)
     if (error) { setSavingEdit(false); Alert.alert('Fehler', error.message); return }
 
-    const isClose = action.closestrade || (editingEvent.event_type === 'tp_hit' && parseFloat(editSize) === 100)
+    // Same cumulative-fill check as handleSave, not just this one event's
+    // own size - editing a tp_hit/partial_close up to a cumulative 100%
+    // (e.g. correcting an earlier typo) previously never auto-closed unless
+    // this single edited event alone happened to read exactly 100%.
+    let isCumulativeClose = false
+    if (editingEvent.event_type === 'tp_hit' || editingEvent.event_type === 'partial_close') {
+      const { data: freshEvents } = await supabase
+        .from('trade_management_events')
+        .select('event_type, price, size_percent')
+        .eq('trade_id', id)
+        .in('event_type', ['tp_hit', 'partial_close'])
+      const hitPrices = (freshEvents ?? []).filter(ev => ev.event_type === 'tp_hit').map(ev => ev.price ?? 0)
+      const tpTargets = partialProfits.filter(pp => pp.quantity_percent > 0)
+      const allPricesHit = allTpTargetsHit(tpTargets, hitPrices)
+      const totalSizePct = (freshEvents ?? []).reduce((sum, ev) => sum + (ev.size_percent ?? 0), 0)
+      isCumulativeClose = allPricesHit || totalSizePct >= 98
+    }
+    const isClose = action.closestrade || isCumulativeClose
     if (isClose && editPrice) {
-      await supabase.from('trades').update({ exit_price: parseFloat(editPrice), closed_at: iso }).eq('id', id)
+      await supabase.from('trades').update({ status: 'closed', exit_price: parseFloat(editPrice), closed_at: iso }).eq('id', id)
     }
     setSavingEdit(false); closeEdit(); await loadData()
   }
@@ -305,8 +325,24 @@ export default function ManageTradeScreen() {
       // make detectManagementEvents emit a duplicate sl_moved_to_be event.
       const beAlreadyLogged = events.some(ev => ev.event_type === 'sl_moved_to_be' || ev.event_type === 'sl_moved_manual')
       const beTrigger = beAlreadyLogged ? undefined : partialProfits.find(pp => pp.quantity_percent === 0)?.target_price
-      const detected = detectManagementEvents(candles, trade.entry_price, currentSL, trade.side, tpLevels, beTrigger)
-      if (detected.length === 0) { Alert.alert('Keine Events', 'SL und TPs wurden in diesem Zeitraum nicht getroffen.'); setDetecting(false); return }
+      const rawDetected = detectManagementEvents(candles, trade.entry_price, currentSL, trade.side, tpLevels, beTrigger)
+      if (rawDetected.length === 0) { Alert.alert('Keine Events', 'SL und TPs wurden in diesem Zeitraum nicht getroffen.'); setDetecting(false); return }
+      // Drop anything that's already been logged, manually or from a
+      // previous detection run - previously every detected event was
+      // pre-selected by default, so re-running detection could silently
+      // insert duplicates (e.g. double-decrementing remaining size) if the
+      // user didn't notice and manually uncheck the repeat.
+      const alreadyLoggedTypes = new Set(events.filter(ev => ev.event_type === 'sl_hit' || ev.event_type === 'sl_moved_to_be').map(ev => ev.event_type))
+      const alreadyLoggedTpPrices = events.filter(ev => ev.event_type === 'tp_hit').map(ev => ev.price ?? 0)
+      const detected = rawDetected.filter(d => {
+        if (d.event_type === 'sl_hit' || d.event_type === 'sl_moved_to_be') return !alreadyLoggedTypes.has(d.event_type)
+        if (d.event_type === 'tp_hit') {
+          const tolerance = Math.max(d.price * 0.001, 0.01)
+          return !alreadyLoggedTpPrices.some(p => Math.abs(p - d.price) < tolerance)
+        }
+        return true
+      })
+      if (detected.length === 0) { Alert.alert('Keine neuen Events', 'Alle in diesem Zeitraum erkannten Events sind bereits geloggt.'); setDetecting(false); return }
       setDetectedEvents(detected)
       setSelectedDetected(new Set(detected.map((_, i) => i)))
       setShowDetectedModal(true)

@@ -75,7 +75,11 @@ export default function NewTradeScreen() {
       setTags(tagDefs ?? [])
       setStratTagLinks(links ?? [])
       const def = accList.find(a => a.is_default)
-      if (def) setForm(f => ({ ...f, account_id: def.id, risk_percent: String(def.default_risk_percent) }))
+      // Only autofill if the user hasn't already picked an account by the
+      // time this resolves (e.g. on a slow connection, tapping a different
+      // account chip and typing a risk% before load() finishes previously
+      // got silently overwritten by the default account's values here).
+      if (def) setForm(f => f.account_id ? f : { ...f, account_id: def.id, risk_percent: String(def.default_risk_percent) })
     }
     load()
   }, [])

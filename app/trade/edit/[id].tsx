@@ -29,6 +29,7 @@ export default function EditTradeScreen() {
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
   const [showEntryPicker, setShowEntryPicker] = useState(false)
   const [tpLevels, setTpLevels] = useState<{ price: string; qty: string }[]>([])
+  const [bePrice, setBePrice] = useState('')
   const [form, setForm] = useState({
     symbol: '',
     side: 'long' as 'long' | 'short',
@@ -67,6 +68,8 @@ export default function EditTradeScreen() {
           .filter((pp: any) => pp.quantity_percent > 0)
           .map((pp: any) => ({ price: String(pp.target_price), qty: String(Math.round(pp.quantity_percent * 100)) }))
       )
+      const beRow = (ppData ?? []).find((pp: any) => pp.quantity_percent === 0)
+      if (beRow) setBePrice(String(beRow.target_price))
       if (!data) return
       setTrade(data)
       // Load account balance for live risk calculation
@@ -301,13 +304,15 @@ export default function EditTradeScreen() {
       if (clInsertErr) Alert.alert('Warnung', `Checkliste konnte nicht gespeichert werden: ${clInsertErr.message}`)
     }
 
-    // Save TP levels: insert the new rows FIRST, only delete the old ones
-    // once that succeeds - if delete ran first and the insert then failed,
-    // previously-valid TP levels would be lost with only a misleading error.
-    // Old rows are deleted by id (captured before inserting) rather than by
-    // the quantity_percent>0 filter, so it can't also catch the rows just
-    // inserted above.
-    const { data: oldPP } = await supabase.from('trade_partial_profits').select('id').eq('trade_id', id).gt('quantity_percent', 0)
+    // Save TP levels + BE-trigger row: insert the new rows FIRST, only
+    // delete the old ones once that succeeds - if delete ran first and the
+    // insert then failed, previously-valid TP levels would be lost with
+    // only a misleading error. Old rows are deleted by id (captured before
+    // inserting) rather than by a quantity_percent filter, so it can't also
+    // catch the rows just inserted above. The BE row (quantity_percent===0)
+    // is included here too - it previously had no edit UI at all, so it
+    // became permanently invisible/stuck once created via trade/new.tsx.
+    const { data: oldPP } = await supabase.from('trade_partial_profits').select('id').eq('trade_id', id)
     const oldPPIds = (oldPP ?? []).map((r: any) => r.id)
     const ppRows = tpLevels
       .filter(tp => {
@@ -322,6 +327,10 @@ export default function EditTradeScreen() {
         quantity_percent: parseFloat(tp.qty) / 100,
         filled: false,
       }))
+    const beParsed = parseFloat(bePrice)
+    if (bePrice && !isNaN(beParsed) && beParsed > 0) {
+      ppRows.push({ trade_id: id, user_id: user.id, label: 'BE', target_price: beParsed, quantity_percent: 0, filled: false })
+    }
     if (ppRows.length > 0) {
       const { error: ppError } = await supabase.from('trade_partial_profits').insert(ppRows)
       if (ppError) {
@@ -443,6 +452,9 @@ export default function EditTradeScreen() {
           <Feather name="plus" size={14} color="#22c55e" />
           <Text style={s.addTpText}>TP hinzufügen</Text>
         </PressFix>
+
+        <Text style={s.label}>Break Even bei Preis (optional)</Text>
+        <TextInput style={s.input} placeholderTextColor="#555" value={bePrice} onChangeText={setBePrice} keyboardType="decimal-pad" placeholder="Preis bei dem SL auf BE gesetzt wird" />
 
         {(() => {
           const calcEntry = parseFloat(form.entry_price) || 0
