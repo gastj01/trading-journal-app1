@@ -1,9 +1,10 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Clipboard from 'expo-clipboard'
+import { useFocusEffect } from 'expo-router'
 import { supabase } from '../../src/lib/supabase'
 import { ANTHROPIC_KEY } from './settings'
 import { calcWeightedR } from '../../src/lib/tradeCalc'
@@ -93,7 +94,7 @@ export default function AnalyticsScreen() {
   const [combinedWarning, setCombinedWarning] = useState<string | null>(null)
   const [rulesetVersions, setRulesetVersions] = useState<Record<string, string>>({})
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
@@ -117,7 +118,7 @@ export default function AnalyticsScreen() {
       setRulesetVersions(versions)
     }
     load()
-  }, [])
+  }, []))
 
   const eventsByTradeId = useMemo(() => {
     const map = new Map<string, ManagementEvent[]>()
