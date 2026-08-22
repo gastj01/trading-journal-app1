@@ -474,16 +474,21 @@ ${tradeBlocks.join('\n\n---\n\n')}
     runAutoTagFor(trades.filter(t => t.strategy_id === activeStrategy.id))
   }
 
-  async function runCombinedKI() {
+  // force=true: manually requested full re-analysis, bypassing the
+  // NEW_TRADES_THRESHOLD gate and using every closed trade of the strategy
+  // instead of just the ones since the last saved version (which is 0 when
+  // there's nothing new yet - the gate otherwise leaves no way to re-run at
+  // all until 10 more trades accumulate).
+  async function runCombinedKI(force = false) {
     if (!activeStrategy) return
     const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
     if (!key) { setCombinedError('Kein API Key in Einstellungen gesetzt.'); return }
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const targetTrades = newTradesForRuleset
+    const targetTrades = force ? trades.filter(t => t.strategy_id === activeStrategy.id) : newTradesForRuleset
     if (targetTrades.length === 0) {
-      setCombinedError('Keine neuen Trades seit der letzten Regelwerk-Version.')
+      setCombinedError(force ? 'Keine geschlossenen Trades für diese Strategie vorhanden.' : 'Keine neuen Trades seit der letzten Regelwerk-Version.')
       return
     }
 
@@ -619,11 +624,13 @@ ${tradeBlocks.join('\n\n---\n\n')}
       }
 
       const prompt = `Du bist ein erfahrener Trading-Coach und Chart-Analyst.
-${isUpdate
-  ? `Aktualisiere das Regelwerk der Strategie "${activeStrategy.name}" anhand von ${targetTrades.length} NEUEN Trades seit der letzten Version. Baue auf dem bestehenden Regelwerk auf — verfeinere, ergänze oder korrigiere es, verwirf es nicht ohne guten Grund.`
-  : `Analysiere alle ${targetTrades.length} Trades der Strategie "${activeStrategy.name}" und erstelle ein präzises Regelwerk.`}
+${force
+  ? `Führe eine VOLLSTÄNDIGE Neu-Analyse des Regelwerks der Strategie "${activeStrategy.name}" anhand aller ${targetTrades.length} Trades durch (manuell angefordert, nicht nur neue Trades seit der letzten Version).${isUpdate ? ' Baue auf dem bestehenden Regelwerk auf — verfeinere, ergänze oder korrigiere es, verwirf es nicht ohne guten Grund.' : ''}`
+  : isUpdate
+    ? `Aktualisiere das Regelwerk der Strategie "${activeStrategy.name}" anhand von ${targetTrades.length} NEUEN Trades seit der letzten Version. Baue auf dem bestehenden Regelwerk auf — verfeinere, ergänze oder korrigiere es, verwirf es nicht ohne guten Grund.`
+    : `Analysiere alle ${targetTrades.length} Trades der Strategie "${activeStrategy.name}" und erstelle ein präzises Regelwerk.`}
 ${previousRuleset}${olderVersionsText}
-ALLE ${isUpdate ? 'NEUEN ' : ''}TRADES (kompakt):
+ALLE ${isUpdate && !force ? 'NEUEN ' : ''}TRADES (kompakt):
 ${compactBlocks}
 ${mistakeDigest ? `\nFEHLER-MUSTER IN DIESEN TRADES:\n${mistakeDigest}\n` : ''}
 ${sampleText ? `\nDETAIL-STICHPROBE (beste/schlechteste ${sampleBlocks.length} mit Kerzendaten${hasImages ? ' + Screenshots oben' : ''}):\n${sampleText}\n` : ''}
@@ -1016,6 +1023,15 @@ Antworte auf Deutsch:
                 </PressFix>
               )
             })()}
+            {!combinedLoading && !combinedAnalysis && newTradesForRuleset.length < NEW_TRADES_THRESHOLD
+              && trades.some(t => t.strategy_id === activeStrategy!.id) && (
+              <PressFix style={[s.kiBtn, { borderColor: '#38bdf833', marginTop: 8 }]} onPress={() => runCombinedKI(true)}>
+                <Feather name="refresh-cw" size={14} color="#38bdf8" />
+                <Text style={[s.kiBtnText, { color: '#38bdf8', fontSize: 12 }]}>
+                  Trotzdem analysieren (alle Trades, unabhängig vom {NEW_TRADES_THRESHOLD}-Trades-Limit)
+                </Text>
+              </PressFix>
+            )}
             {combinedError && <Text style={s.kiError}>{combinedError}</Text>}
             {combinedWarning && <Text style={s.kiWarning}>{combinedWarning}</Text>}
             {combinedAnalysis && (
