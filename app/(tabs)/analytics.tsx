@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -232,6 +232,16 @@ export default function AnalyticsScreen() {
 
   const activeStrategy = selectedStrategy ? strategies.find(s => s.id === selectedStrategy) ?? null : null
 
+  // kiAnalysis previously only ever lived in memory - switching strategies,
+  // navigating away, or restarting the app silently lost it, forcing an
+  // expensive re-run just to read it again. Now persisted on
+  // strategy_profiles (last_ki_bewertung), loaded here whenever the
+  // selected strategy changes.
+  useEffect(() => {
+    setKiAnalysis(activeStrategy?.last_ki_bewertung ?? null)
+    setKiError(null)
+  }, [activeStrategy?.id])
+
   const newTradesForRuleset = useMemo(() => {
     if (!activeStrategy) return []
     const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id)
@@ -313,7 +323,11 @@ Direkt und präzise. Kein Intro.`
       })
       if (!res.ok) throw new Error(`API ${res.status}`)
       const data = await res.json()
-      setKiAnalysis(data.content?.[0]?.text ?? 'Keine Antwort.')
+      const text = data.content?.[0]?.text ?? 'Keine Antwort.'
+      setKiAnalysis(text)
+      const now = new Date().toISOString()
+      await supabase.from('strategy_profiles').update({ last_ki_bewertung: text, last_ki_bewertung_at: now }).eq('id', activeStrategy.id)
+      setStrategies(prev => prev.map(s => s.id === activeStrategy.id ? { ...s, last_ki_bewertung: text, last_ki_bewertung_at: now } : s))
     } catch (e: any) {
       setKiError(e?.message ?? 'Fehler')
     } finally {

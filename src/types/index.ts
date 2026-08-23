@@ -120,6 +120,8 @@ export interface StrategyProfile {
   default_tp1_r_multiple: number
   move_remaining_to_be_after_tp1: boolean
   default_timeframe: string | null
+  last_ki_bewertung: string | null
+  last_ki_bewertung_at: string | null
   created_at: string
   updated_at: string
 }
