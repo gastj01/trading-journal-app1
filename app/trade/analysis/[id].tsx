@@ -6,7 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../../src/lib/supabase'
-import { fetchCandles, calcMFEMAE, normalizeSymbol, normalizeInterval } from '../../../src/lib/binance'
+import { fetchCandles, calcMFEMAE, normalizeSymbol, normalizeInterval, getBinanceMarket } from '../../../src/lib/binance'
 import { analyzeTradeWithClaude, buildAnalysisPrompt } from '../../../src/lib/claude'
 import { ANTHROPIC_KEY } from '../../(tabs)/settings'
 import type { Trade, TagDefinition, StrategyProfile, ManagementEvent } from '../../../src/types'
@@ -73,7 +73,8 @@ export default function TradeAnalysisScreen() {
           const symbol = normalizeSymbol(t.symbol)
           const startMs = new Date(t.opened_at).getTime()
           const endMs = t.closed_at ? new Date(t.closed_at).getTime() : Date.now()
-          const candles = await fetchCandles(symbol, interval, startMs, endMs)
+          const market = await getBinanceMarket()
+          const candles = await fetchCandles(symbol, interval, startMs, endMs, market)
           if (candles.length > 0) {
             loadedOhlcv = calcMFEMAE(candles, t.entry_price, t.stop_loss, t.side)
             setOhlcv(loadedOhlcv)

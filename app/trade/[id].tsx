@@ -6,7 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../src/lib/supabase'
-import { fetchCandles, calcMFEMAE, normalizeSymbol, normalizeInterval } from '../../src/lib/binance'
+import { fetchCandles, calcMFEMAE, normalizeSymbol, normalizeInterval, getBinanceMarket } from '../../src/lib/binance'
 import { calcWeightedR } from '../../src/lib/tradeCalc'
 import type { Trade, PartialProfit, ManagementEvent, TagDefinition } from '../../src/types'
 import type { MFEMAEResult } from '../../src/lib/binance'
@@ -80,7 +80,8 @@ export default function TradeDetailScreen() {
         const symbol = normalizeSymbol(t.symbol)
         const startMs = new Date(t.opened_at).getTime()
         const endMs = t.closed_at ? new Date(t.closed_at).getTime() : Date.now()
-        const candles = await fetchCandles(symbol, interval, startMs, endMs)
+        const market = await getBinanceMarket()
+        const candles = await fetchCandles(symbol, interval, startMs, endMs, market)
         if (candles.length === 0) {
           setOhlcvError('Keine Kerzen gefunden')
           return

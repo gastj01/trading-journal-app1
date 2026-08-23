@@ -8,7 +8,7 @@ import { useFocusEffect } from 'expo-router'
 import { supabase } from '../../src/lib/supabase'
 import { ANTHROPIC_KEY } from './settings'
 import { calcWeightedR } from '../../src/lib/tradeCalc'
-import { fetchCandles, normalizeSymbol, normalizeInterval } from '../../src/lib/binance'
+import { fetchCandles, normalizeSymbol, normalizeInterval, getBinanceMarket } from '../../src/lib/binance'
 import { PressFix } from '../../src/components/PressFix'
 import type { Trade, TagDefinition, StrategyProfile, ManagementEvent } from '../../src/types'
 
@@ -51,7 +51,8 @@ async function buildCandleText(t: Trade, maxBody = 90, pre = 30, post = 30): Pro
     const entryMs = new Date(t.opened_at).getTime()
     const exitMs = new Date(t.closed_at).getTime()
     const candleMs = INTERVAL_MS[interval] ?? 900000
-    const candles = await fetchCandles(symbol, interval, entryMs - pre * candleMs, exitMs + post * candleMs)
+    const market = await getBinanceMarket()
+    const candles = await fetchCandles(symbol, interval, entryMs - pre * candleMs, exitMs + post * candleMs, market)
     if (candles.length === 0) return null
 
     const entryIdx = candles.findIndex(c => c.openTime >= entryMs)

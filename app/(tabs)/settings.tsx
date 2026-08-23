@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../src/lib/supabase'
 import { DIAG_OVERLAY_KEY } from '../../src/lib/tapDiag'
 import type { TradingAccount } from '../../src/types'
+import { BINANCE_MARKET_KEY, type BinanceMarket } from '../../src/lib/binance'
 
 export const ANTHROPIC_KEY = 'anthropic_api_key'
 
@@ -19,6 +20,7 @@ export default function SettingsScreen() {
   const [apiKeySaved, setApiKeySaved] = useState(false)
   const [showKey, setShowKey] = useState(false)
   const [diagEnabled, setDiagEnabled] = useState(false)
+  const [binanceMarket, setBinanceMarket] = useState<BinanceMarket>('futures')
 
   useEffect(() => {
     async function load() {
@@ -31,9 +33,16 @@ export default function SettingsScreen() {
       if (stored) { setApiKey(stored); setApiKeySaved(true) }
       const diagStored = await AsyncStorage.getItem(DIAG_OVERLAY_KEY)
       setDiagEnabled(diagStored === 'true')
+      const marketStored = await AsyncStorage.getItem(BINANCE_MARKET_KEY)
+      if (marketStored === 'spot' || marketStored === 'futures') setBinanceMarket(marketStored)
     }
     load()
   }, [])
+
+  async function selectMarket(market: BinanceMarket) {
+    setBinanceMarket(market)
+    await AsyncStorage.setItem(BINANCE_MARKET_KEY, market)
+  }
 
   async function toggleDiag(value: boolean) {
     setDiagEnabled(value)
@@ -122,6 +131,29 @@ export default function SettingsScreen() {
           <Text style={s.apiKeyHint}>Key wird nur lokal auf dem Gerät gespeichert.</Text>
         </View>
 
+        {/* Binance-Markt für Kerzendaten */}
+        <View style={s.section}>
+          <Text style={s.sectionLabel}>Kerzendaten (Binance)</Text>
+          <View style={s.optionRow}>
+            <PressFix
+              style={[s.option, binanceMarket === 'futures' && s.optionActive]}
+              onPress={() => selectMarket('futures')}
+            >
+              <Text style={[s.optionText, binanceMarket === 'futures' && s.optionTextActive]}>Futures (USD-M)</Text>
+            </PressFix>
+            <PressFix
+              style={[s.option, binanceMarket === 'spot' && s.optionActive]}
+              onPress={() => selectMarket('spot')}
+            >
+              <Text style={[s.optionText, binanceMarket === 'spot' && s.optionTextActive]}>Spot</Text>
+            </PressFix>
+          </View>
+          <Text style={s.apiKeyHint}>
+            Spot und Futures haben leicht unterschiedliche Preisverläufe - stelle hier ein, welchen Markt du
+            tatsächlich handelst, damit Kerzen-Suche und TP/SL-Erkennung zur echten Ausführung passen.
+          </Text>
+        </View>
+
         {/* Info */}
         <View style={s.section}>
           <Text style={s.sectionLabel}>Info</Text>
@@ -181,4 +213,9 @@ const s = StyleSheet.create({
   saveKeyText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   saveKeyTextSaved: { color: '#22c55e' },
   apiKeyHint: { color: '#444', fontSize: 11 },
+  optionRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  option: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a', alignItems: 'center' },
+  optionActive: { backgroundColor: '#1e3a2f', borderColor: '#22c55e' },
+  optionText: { color: '#888', fontSize: 13, fontWeight: '600' },
+  optionTextActive: { color: '#22c55e' },
 })

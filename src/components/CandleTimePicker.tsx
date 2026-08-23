@@ -6,7 +6,7 @@ import {
 import { Feather } from '@expo/vector-icons'
 import { nowDateStr } from '../lib/datetime'
 import { findCandlesTouchingPrice, touchLabel, type TimeWindow, type TouchType, type CandleInterval } from '../lib/candlePicker'
-import type { Candle } from '../lib/binance'
+import { getBinanceMarket, type Candle, type BinanceMarket } from '../lib/binance'
 import { PressFix } from './PressFix'
 
 interface Props {
@@ -40,6 +40,11 @@ const TOUCH_TYPES: { key: TouchType; label: string }[] = [
   { key: 'breakout', label: 'Breakout / Stop' },
 ]
 
+const MARKETS: { key: BinanceMarket; label: string }[] = [
+  { key: 'futures', label: 'Futures (USD-M)' },
+  { key: 'spot', label: 'Spot' },
+]
+
 function fmtDate(raw: string): string {
   const d = raw.replace(/\D/g, '').slice(0, 8)
   if (d.length <= 2) return d
@@ -52,6 +57,7 @@ export function CandleTimePicker({ visible, symbol, price, side, initialDate, on
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('full')
   const [interval, setInterval] = useState<CandleInterval>('5m')
   const [touchType, setTouchType] = useState<TouchType>('all')
+  const [market, setMarket] = useState<BinanceMarket>('futures')
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<Candle[]>([])
   const [searched, setSearched] = useState(false)
@@ -61,6 +67,7 @@ export function CandleTimePicker({ visible, symbol, price, side, initialDate, on
       setDate(initialDate ?? nowDateStr())
       setResults([])
       setSearched(false)
+      getBinanceMarket().then(setMarket)
     }
   }, [visible, initialDate])
 
@@ -69,7 +76,7 @@ export function CandleTimePicker({ visible, symbol, price, side, initialDate, on
     setLoading(true)
     setSearched(false)
     try {
-      const candles = await findCandlesTouchingPrice(symbol, interval, price, side, touchType, date, timeWindow)
+      const candles = await findCandlesTouchingPrice(symbol, interval, price, side, touchType, date, timeWindow, market)
       setResults(candles)
       setSearched(true)
     } catch (e: any) {
@@ -149,6 +156,16 @@ export function CandleTimePicker({ visible, symbol, price, side, initialDate, on
               <PressFix key={tt.key} style={[s.chip, touchType === tt.key && s.chipOn]}
                 onPress={() => setTouchType(tt.key)}>
                 <Text style={[s.chipTxt, touchType === tt.key && s.chipTxtOn]}>{tt.label}</Text>
+              </PressFix>
+            ))}
+          </View>
+
+          <Text style={s.label}>Markt</Text>
+          <View style={s.chipRow}>
+            {MARKETS.map(m => (
+              <PressFix key={m.key} style={[s.chip, market === m.key && s.chipOn]}
+                onPress={() => setMarket(m.key)}>
+                <Text style={[s.chipTxt, market === m.key && s.chipTxtOn]}>{m.label}</Text>
               </PressFix>
             ))}
           </View>

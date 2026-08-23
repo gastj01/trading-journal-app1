@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage'
+
 export interface Candle {
   openTime: number
   open: number
@@ -43,11 +45,33 @@ export function normalizeInterval(timeframe: string): string | null {
   return INTERVAL_MAP[timeframe] ?? INTERVAL_MAP[timeframe.toUpperCase()] ?? null
 }
 
+// Spot (api.binance.com) and USD-M Futures (fapi.binance.com) are different
+// markets with measurably different minute-by-minute price paths - a level
+// touched on one isn't necessarily touched at the same time (or at all) on
+// the other. The user trades/charts on Binance Futures via MMT (confirmed
+// against real candle data 2026-08-23: a logged entry price matched a
+// futures candle but not the spot candle at the same minute), so futures
+// is the default; spot stays selectable for anyone trading spot instead.
+export type BinanceMarket = 'spot' | 'futures'
+
+export const BINANCE_MARKET_KEY = 'binance_market'
+
+export async function getBinanceMarket(): Promise<BinanceMarket> {
+  const stored = await AsyncStorage.getItem(BINANCE_MARKET_KEY)
+  return stored === 'spot' ? 'spot' : 'futures'
+}
+
+const KLINES_BASE_URL: Record<BinanceMarket, string> = {
+  spot: 'https://api.binance.com/api/v3/klines',
+  futures: 'https://fapi.binance.com/fapi/v1/klines',
+}
+
 async function fetchCandleBatch(
   symbol: string,
   interval: string,
   startMs: number,
   endMs: number,
+  market: BinanceMarket,
 ): Promise<Candle[]> {
   const params = new URLSearchParams({
     symbol,
@@ -56,7 +80,7 @@ async function fetchCandleBatch(
     endTime: String(endMs),
     limit: '1000',
   })
-  const res = await fetch(`https://api.binance.com/api/v3/klines?${params}`)
+  const res = await fetch(`${KLINES_BASE_URL[market]}?${params}`)
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`Binance ${res.status}: ${body}`)
@@ -77,11 +101,12 @@ export async function fetchCandles(
   interval: string,
   startMs: number,
   endMs: number,
+  market: BinanceMarket = 'futures',
 ): Promise<Candle[]> {
   const all: Candle[] = []
   let cursor = startMs
   while (cursor < endMs) {
-    const batch = await fetchCandleBatch(symbol, interval, cursor, endMs)
+    const batch = await fetchCandleBatch(symbol, interval, cursor, endMs, market)
     if (batch.length === 0) break
     all.push(...batch)
     if (batch.length < 1000) break

@@ -1,4 +1,4 @@
-import { fetchCandles, normalizeSymbol, type Candle } from './binance'
+import { fetchCandles, normalizeSymbol, type Candle, type BinanceMarket } from './binance'
 
 export type TimeWindow = 'full' | 'morning' | 'afternoon' | 'night'
 export type TouchType = 'all' | 'bounce' | 'breakout'
@@ -56,11 +56,12 @@ export async function findCandlesTouchingPrice(
   touchType: TouchType,
   dateStr: string,
   window: TimeWindow,
+  market: BinanceMarket = 'futures',
 ): Promise<Candle[]> {
   const sym = normalizeSymbol(symbol)
   const [startMs, endMs] = getWindowMs(dateStr, window)
   if (!startMs) throw new Error('Ungültiges Datum')
-  const candles = await fetchCandles(sym, interval, startMs, endMs)
+  const candles = await fetchCandles(sym, interval, startMs, endMs, market)
   return filterCandles(candles, price, side, touchType)
 }
 

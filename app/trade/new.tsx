@@ -11,7 +11,7 @@ import { nowDateStr, nowTimeStr, parseDateTimeToISO } from '../../src/lib/dateti
 import { PressFix } from '../../src/components/PressFix'
 import { DateTimeInputs } from '../../src/components/DateTimeInputs'
 import { CandleTimePicker } from '../../src/components/CandleTimePicker'
-import { fetchCandles, normalizeSymbol, normalizeInterval } from '../../src/lib/binance'
+import { fetchCandles, normalizeSymbol, normalizeInterval, getBinanceMarket } from '../../src/lib/binance'
 import { ANTHROPIC_KEY } from '../(tabs)/settings'
 import type { TradingAccount, StrategyProfile, TagDefinition, ChecklistItem } from '../../src/types'
 
@@ -207,7 +207,8 @@ export default function NewTradeScreen() {
         ? new Date(parseDateTimeToISO(form.trade_date, form.trade_time)!).getTime()
         : Date.now()
       const candleMs = INTERVAL_MS[interval] ?? 900000
-      const candles = await fetchCandles(normalizeSymbol(form.symbol), interval, entryMs - 50 * candleMs, entryMs + candleMs)
+      const market = await getBinanceMarket()
+      const candles = await fetchCandles(normalizeSymbol(form.symbol), interval, entryMs - 50 * candleMs, entryMs + candleMs, market)
       if (candles.length > 0) {
         const rows = candles.slice(-50).map(c => {
           const dt = new Date(c.openTime)

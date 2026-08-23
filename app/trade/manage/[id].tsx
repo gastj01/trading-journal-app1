@@ -8,7 +8,7 @@ import { PressFix } from '../../../src/components/PressFix'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Feather } from '@expo/vector-icons'
 import { supabase } from '../../../src/lib/supabase'
-import { fetchCandles, detectManagementEvents, normalizeSymbol, normalizeInterval, type DetectedEvent } from '../../../src/lib/binance'
+import { fetchCandles, detectManagementEvents, normalizeSymbol, normalizeInterval, getBinanceMarket, type DetectedEvent } from '../../../src/lib/binance'
 import { nowDateStr, nowTimeStr, isoToDateStr, isoToTimeStr, parseDateTimeToISO } from '../../../src/lib/datetime'
 import { DateTimeInputs } from '../../../src/components/DateTimeInputs'
 import { CandleTimePicker } from '../../../src/components/CandleTimePicker'
@@ -173,7 +173,8 @@ export default function ManageTradeScreen() {
       const interval = normalizeInterval(trade.timeframe) ?? '5m'
       const startMs = new Date(trade.opened_at).getTime()
       const endMs = trade.closed_at ? new Date(trade.closed_at).getTime() : Date.now()
-      const candles = await fetchCandles(symbol, interval, startMs, endMs)
+      const market = await getBinanceMarket()
+      const candles = await fetchCandles(symbol, interval, startMs, endMs, market)
       const hit = candles.find(c =>
         trade.side === 'long' ? c.high >= pp.target_price : c.low <= pp.target_price
       )
@@ -315,7 +316,8 @@ export default function ManageTradeScreen() {
     try {
       const startMs = new Date(trade.opened_at).getTime()
       const endMs = trade.closed_at ? new Date(trade.closed_at).getTime() : Date.now()
-      const candles = await fetchCandles(symbol, interval, startMs, endMs)
+      const market = await getBinanceMarket()
+      const candles = await fetchCandles(symbol, interval, startMs, endMs, market)
       if (candles.length === 0) { Alert.alert('Keine Kerzen', 'Für diesen Zeitraum keine Kerzen gefunden.'); setDetecting(false); return }
       const tpLevels = partialProfits
         .filter(pp => pp.quantity_percent > 0)
