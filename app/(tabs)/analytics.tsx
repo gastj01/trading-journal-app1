@@ -10,9 +10,22 @@ import { ANTHROPIC_KEY } from './settings'
 import { calcWeightedR } from '../../src/lib/tradeCalc'
 import { fetchCandles, normalizeSymbol, normalizeInterval, getBinanceMarket } from '../../src/lib/binance'
 import { PressFix } from '../../src/components/PressFix'
-import type { Trade, TagDefinition, StrategyProfile, ManagementEvent } from '../../src/types'
+import type { Trade, TagDefinition, StrategyProfile, ManagementEvent, TradingAccount } from '../../src/types'
 
 type Period = '7d' | '30d' | '90d' | 'all'
+type Mode = 'all' | 'backtest' | 'live'
+
+function tradesPerDay(list: Trade[], period: Period): number {
+  if (list.length === 0) return 0
+  let days: number
+  if (period !== 'all') {
+    days = period === '7d' ? 7 : period === '30d' ? 30 : 90
+  } else {
+    const times = list.map(t => new Date(t.opened_at).getTime())
+    days = Math.max(1, (Math.max(...times) - Math.min(...times)) / 86400000)
+  }
+  return list.length / days
+}
 
 interface TagAssignment { tag_id: string; trade_id: string }
 
@@ -85,15 +98,17 @@ async function buildCandleText(t: Trade, maxBody = 90, pre = 30, post = 30): Pro
 export default function AnalyticsScreen() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [strategies, setStrategies] = useState<StrategyProfile[]>([])
+  const [accounts, setAccounts] = useState<TradingAccount[]>([])
   const [tagDefs, setTagDefs] = useState<TagDefinition[]>([])
   const [assignments, setAssignments] = useState<TagAssignment[]>([])
   const [period, setPeriod] = useState<Period>('30d')
+  const [mode, setMode] = useState<Mode>('all')
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null)
   const [managementEvents, setManagementEvents] = useState<ManagementEvent[]>([])
-  const [kiAnalysis, setKiAnalysis] = useState<string | null>(null)
-  const [kiLoading, setKiLoading] = useState(false)
-  const [kiError, setKiError] = useState<string | null>(null)
-  const [kiCopied, setKiCopied] = useState(false)
+  const [kiAnalysis, setKiAnalysis] = useState<{ backtest: string | null; live: string | null }>({ backtest: null, live: null })
+  const [kiLoadingMode, setKiLoadingMode] = useState<'backtest' | 'live' | null>(null)
+  const [kiErrorMode, setKiErrorMode] = useState<{ backtest: string | null; live: string | null }>({ backtest: null, live: null })
+  const [kiCopiedMode, setKiCopiedMode] = useState<'backtest' | 'live' | null>(null)
   const [combinedAnalysis, setCombinedAnalysis] = useState<string | null>(null)
   const [combinedLoading, setCombinedLoading] = useState(false)
   const [combinedError, setCombinedError] = useState<string | null>(null)
@@ -112,19 +127,21 @@ export default function AnalyticsScreen() {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const [{ data: tradeData }, { data: asgn }, { data: tags }, { data: strats }, { data: evData }, { data: rulesetHist }] = await Promise.all([
+      const [{ data: tradeData }, { data: asgn }, { data: tags }, { data: strats }, { data: evData }, { data: rulesetHist }, { data: accts }] = await Promise.all([
         supabase.from('trades').select('*').eq('user_id', user.id).eq('status', 'closed').order('opened_at', { ascending: false }),
         supabase.from('trade_tag_assignments').select('tag_id, trade_id').eq('user_id', user.id),
         supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id),
         supabase.from('strategy_profiles').select('*').eq('user_id', user.id).order('name'),
         supabase.from('trade_management_events').select('*').eq('user_id', user.id),
         supabase.from('strategy_ruleset_history').select('strategy_id, created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('trading_accounts').select('id, account_type').eq('user_id', user.id),
       ])
       setTrades(tradeData ?? [])
       setAssignments(asgn ?? [])
       setTagDefs(tags ?? [])
       setStrategies(strats ?? [])
       setManagementEvents(evData ?? [])
+      setAccounts((accts ?? []) as TradingAccount[])
       const versions: Record<string, string> = {}
       for (const h of rulesetHist ?? []) {
         if (!versions[h.strategy_id]) versions[h.strategy_id] = h.created_at
@@ -143,7 +160,17 @@ export default function AnalyticsScreen() {
     return map
   }, [managementEvents])
 
-  const filtered = useMemo(() => {
+  const accountTypeById = useMemo(() => {
+    const map = new Map<string, TradingAccount['account_type']>()
+    for (const a of accounts) map.set(a.id, a.account_type)
+    return map
+  }, [accounts])
+
+  // strategy + period only, WITHOUT the backtest/live mode filter - used for
+  // the always-visible Backtest-vs-Live comparison and the mode-independent
+  // KI-Bewertung buttons, so both stay available no matter which mode is
+  // currently toggled in the main view below.
+  const strategyPeriodFiltered = useMemo(() => {
     let result = selectedStrategy === null
       ? trades
       : selectedStrategy === '__none__'
@@ -159,9 +186,24 @@ export default function AnalyticsScreen() {
     return result
   }, [trades, period, selectedStrategy])
 
-  const tagStats = useMemo(() => {
-    const filteredIds = new Set(filtered.map(t => t.id))
-    const tradeMap = new Map(filtered.map(t => [t.id, t]))
+  const backtestTrades = useMemo(() =>
+    strategyPeriodFiltered.filter(t => accountTypeById.get(t.account_id) === 'backtest'),
+    [strategyPeriodFiltered, accountTypeById])
+  const liveTrades = useMemo(() =>
+    strategyPeriodFiltered.filter(t => accountTypeById.get(t.account_id) === 'live'),
+    [strategyPeriodFiltered, accountTypeById])
+
+  const filtered = useMemo(() => {
+    if (mode === 'all') return strategyPeriodFiltered
+    return strategyPeriodFiltered.filter(t => accountTypeById.get(t.account_id) === mode)
+  }, [strategyPeriodFiltered, mode, accountTypeById])
+
+  // Plain (non-hook) computation so it can also be called directly for an
+  // arbitrary trade subset (the mode-specific KI-Bewertung), not just via
+  // the useMemo below which is tied to the currently displayed `filtered`.
+  const computeTagStats = useCallback((list: Trade[]) => {
+    const filteredIds = new Set(list.map(t => t.id))
+    const tradeMap = new Map(list.map(t => [t.id, t]))
     const stats: Record<string, { tag: TagDefinition; total: number; inWin: number; inLoss: number; rVals: number[] }> = {}
 
     for (const tag of tagDefs) {
@@ -182,10 +224,12 @@ export default function AnalyticsScreen() {
       .filter(s => s.total > 0)
       .map(s => ({ ...s, avgR: s.rVals.reduce((a, b) => a + b, 0) / s.rVals.length }))
       .sort((a, b) => b.total - a.total)
-  }, [filtered, tagDefs, assignments])
+  }, [tagDefs, assignments, eventsByTradeId])
 
-  const managementStats = useMemo(() => {
-    const tradeIds = new Set(filtered.map(t => t.id))
+  const tagStats = useMemo(() => computeTagStats(filtered), [filtered, computeTagStats])
+
+  const computeManagementStats = useCallback((list: Trade[]) => {
+    const tradeIds = new Set(list.map(t => t.id))
     const relevantEvents = managementEvents.filter(ev => tradeIds.has(ev.trade_id))
     const eventsByTrade = new Map<string, ManagementEvent[]>()
     for (const ev of relevantEvents) {
@@ -193,17 +237,17 @@ export default function AnalyticsScreen() {
       eventsByTrade.get(ev.trade_id)!.push(ev)
     }
 
-    const managedTrades = filtered.filter(t => eventsByTrade.has(t.id))
-    const beMovedTrades = filtered.filter(t =>
+    const managedTrades = list.filter(t => eventsByTrade.has(t.id))
+    const beMovedTrades = list.filter(t =>
       (eventsByTrade.get(t.id) ?? []).some(ev => ev.event_type === 'sl_moved_to_be')
     )
     const beHitTrades = beMovedTrades.filter(t =>
       (eventsByTrade.get(t.id) ?? []).some(ev => ev.event_type === 'sl_hit')
     )
-    const tp1Trades = filtered.filter(t =>
+    const tp1Trades = list.filter(t =>
       (eventsByTrade.get(t.id) ?? []).some(ev => ev.event_type === 'tp_hit')
     )
-    const partialTrades = filtered.filter(t =>
+    const partialTrades = list.filter(t =>
       (eventsByTrade.get(t.id) ?? []).some(ev => ev.event_type === 'partial_close')
     )
 
@@ -227,7 +271,9 @@ export default function AnalyticsScreen() {
       avgTp1R,
       hasData: managedTrades.length > 0,
     }
-  }, [filtered, managementEvents])
+  }, [managementEvents])
+
+  const managementStats = useMemo(() => computeManagementStats(filtered), [filtered, computeManagementStats])
 
   const stats = calcStats(filtered, eventsByTradeId)
 
@@ -239,8 +285,11 @@ export default function AnalyticsScreen() {
   // strategy_profiles (last_ki_bewertung), loaded here whenever the
   // selected strategy changes.
   useEffect(() => {
-    setKiAnalysis(activeStrategy?.last_ki_bewertung ?? null)
-    setKiError(null)
+    setKiAnalysis({
+      backtest: activeStrategy?.last_ki_bewertung ?? null,
+      live: activeStrategy?.last_ki_bewertung_live ?? null,
+    })
+    setKiErrorMode({ backtest: null, live: null })
   }, [activeStrategy?.id])
 
   const newTradesForRuleset = useMemo(() => {
@@ -252,51 +301,67 @@ export default function AnalyticsScreen() {
     return stratTrades.filter(t => new Date(t.closed_at ?? t.opened_at).getTime() > cutoff)
   }, [trades, activeStrategy, rulesetVersions])
 
-  async function runStrategyKI() {
+  // Backtest und Live werden unabhängig vom aktuellen Mode-Filter oben immer
+  // beide angeboten (je eigener Button, eigenes Ergebnis, eigene Speicherung
+  // in last_ki_bewertung[_live]) - so bleibt der Vergleich jederzeit möglich,
+  // egal welcher Filter gerade aktiv ist.
+  async function runStrategyKI(kiMode: 'backtest' | 'live') {
     if (!activeStrategy) return
     const key = await AsyncStorage.getItem(ANTHROPIC_KEY)
-    if (!key) { setKiError('Kein API Key in Einstellungen gesetzt.'); return }
+    if (!key) { setKiErrorMode(prev => ({ ...prev, [kiMode]: 'Kein API Key in Einstellungen gesetzt.' })); return }
 
-    setKiLoading(true)
-    setKiError(null)
-    setKiAnalysis(null)
+    const modeTrades = kiMode === 'backtest' ? backtestTrades : liveTrades
+    if (modeTrades.length === 0) {
+      setKiErrorMode(prev => ({ ...prev, [kiMode]: `Keine ${kiMode === 'backtest' ? 'Backtest' : 'Live'}-Trades für diese Strategie vorhanden.` }))
+      return
+    }
+
+    setKiLoadingMode(kiMode)
+    setKiErrorMode(prev => ({ ...prev, [kiMode]: null }))
+    setKiAnalysis(prev => ({ ...prev, [kiMode]: null }))
+
+    const modeStats = calcStats(modeTrades, eventsByTradeId)
+    const modeTagStats = computeTagStats(modeTrades)
+    const modeMgmtStats = computeManagementStats(modeTrades)
 
     const sessionLines = SESSIONS.map(sess => {
-      const t = filtered.filter(t => sess.hours.includes(new Date(t.opened_at).getUTCHours()))
+      const t = modeTrades.filter(tr => sess.hours.includes(new Date(tr.opened_at).getUTCHours()))
       const st = calcStats(t, eventsByTradeId)
       return `  ${sess.label}: ${t.length} Trades, ${st.winRate.toFixed(0)}% WR, ${st.totalR > 0 ? '+' : ''}${st.totalR.toFixed(1)}R`
     }).join('\n')
 
     const days = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
     const dayLines = days.map((day, i) => {
-      const t = filtered.filter(tr => new Date(tr.opened_at).getDay() === (i + 1) % 7)
+      const t = modeTrades.filter(tr => new Date(tr.opened_at).getDay() === (i + 1) % 7)
       const st = calcStats(t, eventsByTradeId)
       return t.length > 0 ? `  ${day}: ${t.length} Trades, ${st.winRate.toFixed(0)}% WR, ${st.totalR > 0 ? '+' : ''}${st.totalR.toFixed(1)}R` : null
     }).filter(Boolean).join('\n')
 
-    const mistakeTags = tagStats.filter(ts => ts.tag.tag_type === 'mistake' && ts.total > 0)
+    const mistakeTags = modeTagStats.filter(ts => ts.tag.tag_type === 'mistake' && ts.total > 0)
       .map(ts => `  ${ts.tag.name.replace(/_/g, ' ')}: ${ts.total}× (Ø ${ts.avgR.toFixed(1)}R, ${ts.inLoss}× in Loss)`).join('\n')
 
-    const mgmtLines = managementStats.hasData
-      ? `\nMANAGEMENT-AUSWERTUNG (${managementStats.managedCount} gemanagte Trades):
-  SL → Break Even: ${managementStats.beMovedCount}× (${filtered.length > 0 ? ((managementStats.beMovedCount / filtered.length) * 100).toFixed(0) : 0}% der Trades)
-  BE gehalten: ${managementStats.beHeldCount}/${managementStats.beMovedCount} (${managementStats.beMovedCount > 0 ? ((managementStats.beHeldCount / managementStats.beMovedCount) * 100).toFixed(0) : 0}% Halterate)
-  TP1 getroffen: ${managementStats.tp1Count}×${managementStats.avgTp1R !== null ? ` (Ø ${managementStats.avgTp1R.toFixed(2)}R)` : ''}
-  Partial Close: ${managementStats.partialCount}×`
+    const mgmtLines = modeMgmtStats.hasData
+      ? `\nMANAGEMENT-AUSWERTUNG (${modeMgmtStats.managedCount} gemanagte Trades):
+  SL → Break Even: ${modeMgmtStats.beMovedCount}× (${modeTrades.length > 0 ? ((modeMgmtStats.beMovedCount / modeTrades.length) * 100).toFixed(0) : 0}% der Trades)
+  BE gehalten: ${modeMgmtStats.beHeldCount}/${modeMgmtStats.beMovedCount} (${modeMgmtStats.beMovedCount > 0 ? ((modeMgmtStats.beHeldCount / modeMgmtStats.beMovedCount) * 100).toFixed(0) : 0}% Halterate)
+  TP1 getroffen: ${modeMgmtStats.tp1Count}×${modeMgmtStats.avgTp1R !== null ? ` (Ø ${modeMgmtStats.avgTp1R.toFixed(2)}R)` : ''}
+  Partial Close: ${modeMgmtStats.partialCount}×`
       : ''
 
-    const prompt = `Du bist ein erfahrener Trading-Coach. Bewerte diese Trading-Strategie objektiv auf Deutsch.
+    const modeLabel = kiMode === 'backtest' ? 'Backtest' : 'Live'
+    const freq = tradesPerDay(modeTrades, period)
+    const prompt = `Du bist ein erfahrener Trading-Coach. Bewerte diese Trading-Strategie objektiv auf Deutsch — ausschließlich anhand der ${modeLabel}-Trades.
 
-STRATEGIE: "${activeStrategy.name}"
+STRATEGIE: "${activeStrategy.name}" (${modeLabel})
 ${activeStrategy.description ? `\nREGELWERK:\n${activeStrategy.description}` : '(Kein Regelwerk hinterlegt)'}
 
-PERFORMANCE-DATEN (${filtered.length} Trades, Zeitraum: ${period === 'all' ? 'Alle' : period}):
-Win Rate: ${stats.winRate.toFixed(1)}%
-Total R: ${stats.totalR > 0 ? '+' : ''}${stats.totalR.toFixed(2)}R
-Ø R pro Trade: ${stats.avgR > 0 ? '+' : ''}${stats.avgR.toFixed(2)}R
-Profit Factor: ${stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)}
-Max Drawdown: ${stats.maxDD.toFixed(2)}R
-Wins: ${stats.wins} | Losses: ${stats.losses}
+PERFORMANCE-DATEN (${modeTrades.length} ${modeLabel}-Trades, Zeitraum: ${period === 'all' ? 'Alle' : period}, ≈${freq.toFixed(2)} Trades/Tag):
+Win Rate: ${modeStats.winRate.toFixed(1)}%
+Total R: ${modeStats.totalR > 0 ? '+' : ''}${modeStats.totalR.toFixed(2)}R
+Ø R pro Trade: ${modeStats.avgR > 0 ? '+' : ''}${modeStats.avgR.toFixed(2)}R
+Profit Factor: ${modeStats.profitFactor === Infinity ? '∞' : modeStats.profitFactor.toFixed(2)}
+Max Drawdown: ${modeStats.maxDD.toFixed(2)}R
+Wins: ${modeStats.wins} | Losses: ${modeStats.losses}
 ${mgmtLines}
 SESSIONS (UTC):
 ${sessionLines}
@@ -312,7 +377,7 @@ Gib eine strukturierte Bewertung mit:
 2. **Performance-Einschätzung** — Ist die Strategie profitabel? Wo liegen Schwächen?
 3. **Beste Bedingungen** — Wann funktioniert die Strategie am besten (Session, Wochentag)?
 4. **Häufige Fehler** — Welche Fehler-Tags kosten am meisten R?
-${managementStats.hasData ? '5. **Management-Bewertung** — Wird BE-Verschiebung sinnvoll genutzt? Ist die TP1-Halterate gut?\n6. **Verbesserungsvorschläge** — 3-5 konkrete, umsetzbare Empfehlungen' : '5. **Verbesserungsvorschläge** — 3-5 konkrete, umsetzbare Empfehlungen'}
+${modeMgmtStats.hasData ? '5. **Management-Bewertung** — Wird BE-Verschiebung sinnvoll genutzt? Ist die TP1-Halterate gut?\n6. **Verbesserungsvorschläge** — 3-5 konkrete, umsetzbare Empfehlungen' : '5. **Verbesserungsvorschläge** — 3-5 konkrete, umsetzbare Empfehlungen'}
 
 Direkt und präzise. Kein Intro.`
 
@@ -325,14 +390,16 @@ Direkt und präzise. Kein Intro.`
       if (!res.ok) throw new Error(`API ${res.status}`)
       const data = await res.json()
       const text = data.content?.[0]?.text ?? 'Keine Antwort.'
-      setKiAnalysis(text)
+      setKiAnalysis(prev => ({ ...prev, [kiMode]: text }))
       const now = new Date().toISOString()
-      await supabase.from('strategy_profiles').update({ last_ki_bewertung: text, last_ki_bewertung_at: now }).eq('id', activeStrategy.id)
-      setStrategies(prev => prev.map(s => s.id === activeStrategy.id ? { ...s, last_ki_bewertung: text, last_ki_bewertung_at: now } : s))
+      const field = kiMode === 'backtest' ? 'last_ki_bewertung' : 'last_ki_bewertung_live'
+      const atField = kiMode === 'backtest' ? 'last_ki_bewertung_at' : 'last_ki_bewertung_live_at'
+      await supabase.from('strategy_profiles').update({ [field]: text, [atField]: now }).eq('id', activeStrategy.id)
+      setStrategies(prev => prev.map(s => s.id === activeStrategy.id ? { ...s, [field]: text, [atField]: now } : s))
     } catch (e: any) {
-      setKiError(e?.message ?? 'Fehler')
+      setKiErrorMode(prev => ({ ...prev, [kiMode]: e?.message ?? 'Fehler' }))
     } finally {
-      setKiLoading(false)
+      setKiLoadingMode(null)
     }
   }
 
@@ -810,8 +877,29 @@ Antworte auf Deutsch:
           ))}
         </View>
 
+        {/* Backtest / Live mode filter */}
+        <View style={s.periodRow}>
+          {(['all', 'backtest', 'live'] as Mode[]).map(m => (
+            <PressFix key={m} style={[s.periodBtn, mode === m && s.periodActive]} onPress={() => setMode(m)}>
+              <Text style={[s.periodText, mode === m && s.periodTextActive]}>
+                {m === 'all' ? 'Alle' : m === 'backtest' ? 'Backtest' : 'Live'}
+              </Text>
+            </PressFix>
+          ))}
+        </View>
+
         {selectedStrategy !== null && (
           <Text style={s.filterLabel}>📊 {activeStratName} · {filtered.length} Trades</Text>
+        )}
+
+        {(backtestTrades.length > 0 || liveTrades.length > 0) && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>Backtest vs. Live</Text>
+            <View style={s.sideStats}>
+              <SideStat label="Backtest" trades={backtestTrades} eventsByTrade={eventsByTradeId} period={period} />
+              <SideStat label="Live" trades={liveTrades} eventsByTrade={eventsByTradeId} period={period} />
+            </View>
+          </View>
         )}
 
         {/* Main stats */}
@@ -821,6 +909,7 @@ Antworte auf Deutsch:
           <BigStat label="Profit Factor" value={stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)} positive={stats.profitFactor > 1} />
           <BigStat label="Avg R" value={`${stats.avgR > 0 ? '+' : ''}${stats.avgR.toFixed(2)}R`} positive={stats.avgR > 0} />
           <BigStat label="Trades" value={String(filtered.length)} />
+          <BigStat label="Trades/Tag" value={tradesPerDay(filtered, period).toFixed(2)} />
           <BigStat label="Max DD" value={`${stats.maxDD.toFixed(2)}R`} positive={false} />
         </View>
 
@@ -839,8 +928,8 @@ Antworte auf Deutsch:
         <View style={s.section}>
           <Text style={s.sectionTitle}>Long / Short</Text>
           <View style={s.sideStats}>
-            <SideStat label="Long" trades={filtered.filter(t => t.side === 'long')} eventsByTrade={eventsByTradeId} />
-            <SideStat label="Short" trades={filtered.filter(t => t.side === 'short')} eventsByTrade={eventsByTradeId} />
+            <SideStat label="Long" trades={filtered.filter(t => t.side === 'long')} eventsByTrade={eventsByTradeId} period={period} />
+            <SideStat label="Short" trades={filtered.filter(t => t.side === 'short')} eventsByTrade={eventsByTradeId} period={period} />
           </View>
         </View>
 
@@ -965,32 +1054,48 @@ Antworte auf Deutsch:
 
         {activeStrategy && (
           <View style={s.section}>
-            {/* Existing performance KI */}
-            <PressFix style={s.kiBtn} onPress={runStrategyKI} disabled={kiLoading}>
-              {kiLoading ? <ActivityIndicator size="small" color="#818cf8" /> : <Feather name="cpu" size={16} color="#818cf8" />}
-              <Text style={s.kiBtnText}>{kiLoading ? 'Analysiert...' : `"${activeStrategy.name}" mit KI bewerten`}</Text>
-            </PressFix>
-            {kiError && <Text style={s.kiError}>{kiError}</Text>}
-            {kiAnalysis && (
-              <View style={s.kiResult}>
-                {kiAnalysis.split('\n').map((line, i) => {
-                  const isBold = line.startsWith('**') && line.includes('**', 2)
-                  if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
-                  if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
-                  return <Text key={i} style={s.kiText}>{line}</Text>
-                })}
-                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
-                  <PressFix onPress={() => setKiAnalysis(null)} style={s.kiRerun}>
-                    <Feather name="refresh-cw" size={12} color="#555" />
-                    <Text style={s.kiRerunText}>Neu analysieren</Text>
+            {/* Existing performance KI - getrennt für Backtest und Live */}
+            {(['backtest', 'live'] as const).map(m => {
+              const label = m === 'backtest' ? 'Backtest' : 'Live'
+              const color = m === 'backtest' ? '#818cf8' : '#22c55e'
+              const modeTrades = m === 'backtest' ? backtestTrades : liveTrades
+              const analysis = kiAnalysis[m]
+              const loading = kiLoadingMode === m
+              const error = kiErrorMode[m]
+              const copied = kiCopiedMode === m
+              return (
+                <View key={m} style={m === 'live' ? { marginTop: 10 } : undefined}>
+                  <PressFix style={[s.kiBtn, { borderColor: `${color}33` }]} onPress={() => runStrategyKI(m)} disabled={loading || modeTrades.length === 0}>
+                    {loading ? <ActivityIndicator size="small" color={color} /> : <Feather name="cpu" size={16} color={color} />}
+                    <Text style={[s.kiBtnText, { color }]}>
+                      {loading ? 'Analysiert...' : `${label} mit KI bewerten (${modeTrades.length})`}
+                    </Text>
                   </PressFix>
-                  <PressFix onPress={() => copyKiText(kiAnalysis, setKiCopied)} style={s.kiRerun}>
-                    <Feather name={kiCopied ? 'check' : 'copy'} size={12} color={kiCopied ? '#22c55e' : '#555'} />
-                    <Text style={[s.kiRerunText, kiCopied && { color: '#22c55e' }]}>{kiCopied ? 'Kopiert ✓' : 'Kopieren'}</Text>
-                  </PressFix>
+                  {error && <Text style={s.kiError}>{error}</Text>}
+                  {analysis && (
+                    <View style={s.kiResult}>
+                      <Text style={[s.kiHeading, { color, marginTop: 0, marginBottom: 6 }]}>{label}-Bewertung</Text>
+                      {analysis.split('\n').map((line, i) => {
+                        const isBold = line.startsWith('**') && line.includes('**', 2)
+                        if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
+                        if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
+                        return <Text key={i} style={s.kiText}>{line}</Text>
+                      })}
+                      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
+                        <PressFix onPress={() => setKiAnalysis(prev => ({ ...prev, [m]: null }))} style={s.kiRerun}>
+                          <Feather name="refresh-cw" size={12} color="#555" />
+                          <Text style={s.kiRerunText}>Neu analysieren</Text>
+                        </PressFix>
+                        <PressFix onPress={() => copyKiText(analysis, v => setKiCopiedMode(v ? m : null))} style={s.kiRerun}>
+                          <Feather name={copied ? 'check' : 'copy'} size={12} color={copied ? '#22c55e' : '#555'} />
+                          <Text style={[s.kiRerunText, copied && { color: '#22c55e' }]}>{copied ? 'Kopiert ✓' : 'Kopieren'}</Text>
+                        </PressFix>
+                      </View>
+                    </View>
+                  )}
                 </View>
-              </View>
-            )}
+              )
+            })}
 
             {/* Auto-Tag & KI Review: alle Trades automatisch taggen */}
             <PressFix style={[s.kiBtn, { borderColor: '#a78bfa33', marginTop: 10 }]} onPress={runAutoTag} disabled={autoTagLoading}>
@@ -1257,12 +1362,12 @@ function MgmtStat({ label, value, sub, positive }: { label: string; value: strin
   )
 }
 
-function SideStat({ label, trades, eventsByTrade }: { label: string; trades: Trade[]; eventsByTrade: Map<string, ManagementEvent[]> }) {
+function SideStat({ label, trades, eventsByTrade, period }: { label: string; trades: Trade[]; eventsByTrade: Map<string, ManagementEvent[]>; period?: Period }) {
   const st = calcStats(trades, eventsByTrade)
   return (
     <View style={s.sideStatBox}>
       <Text style={s.sideStatLabel}>{label}</Text>
-      <Text style={s.sideStatCount}>{trades.length} Trades</Text>
+      <Text style={s.sideStatCount}>{trades.length} Trades{period ? ` · ${tradesPerDay(trades, period).toFixed(2)}/Tag` : ''}</Text>
       <Text style={[s.sideStatR, st.totalR >= 0 ? s.green : s.red]}>{st.totalR > 0 ? '+' : ''}{st.totalR.toFixed(2)}R</Text>
       <Text style={s.sideStatWR}>{st.winRate.toFixed(1)}% WR</Text>
     </View>

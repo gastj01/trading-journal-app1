@@ -122,6 +122,8 @@ export interface StrategyProfile {
   default_timeframe: string | null
   last_ki_bewertung: string | null
   last_ki_bewertung_at: string | null
+  last_ki_bewertung_live: string | null
+  last_ki_bewertung_live_at: string | null
   created_at: string
   updated_at: string
 }
