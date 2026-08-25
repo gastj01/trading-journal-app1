@@ -9,6 +9,7 @@ import { supabase } from '../../src/lib/supabase'
 import { ANTHROPIC_KEY } from './settings'
 import { calcWeightedR } from '../../src/lib/tradeCalc'
 import { fetchCandles, normalizeSymbol, normalizeInterval, getBinanceMarket } from '../../src/lib/binance'
+import { buildDailyRegimeMap, REGIME_TAG_NAMES } from '../../src/lib/marketRegime'
 import { PressFix } from '../../src/components/PressFix'
 import type { Trade, TagDefinition, StrategyProfile, ManagementEvent, TradingAccount } from '../../src/types'
 
@@ -122,6 +123,10 @@ export default function AnalyticsScreen() {
   const [combinedProgress, setCombinedProgress] = useState('')
   const [combinedWarning, setCombinedWarning] = useState<string | null>(null)
   const [rulesetVersions, setRulesetVersions] = useState<Record<string, string>>({})
+  const [regimeLoading, setRegimeLoading] = useState(false)
+  const [regimeProgress, setRegimeProgress] = useState('')
+  const [regimeError, setRegimeError] = useState<string | null>(null)
+  const [regimeDone, setRegimeDone] = useState(false)
 
   useFocusEffect(useCallback(() => {
     async function load() {
@@ -554,6 +559,86 @@ ${tradeBlocks.join('\n\n---\n\n')}
   function runAutoTag() {
     if (!activeStrategy) return
     runAutoTagFor(trades.filter(t => t.strategy_id === activeStrategy.id))
+  }
+
+  // Klassifiziert jeden Trade der Strategie anhand des übergeordneten
+  // Tages-Regimes (Trend/Range/Übergang, siehe marketRegime.ts) am
+  // Entry-Datum und speichert das Ergebnis als normalen context-Tag - damit
+  // taucht die Marktphase automatisch in der bestehenden Tag-Analyse mit
+  // Win-Rate/R-Aufschlüsselung auf, ohne eigene UI-Sektion. Deterministisch
+  // (keine KI nötig), pro Symbol nur eine Tageskerzen-Anfrage statt pro
+  // Trade. Trades, die bereits einen Regime_*-Tag haben, werden
+  // übersprungen (idempotent, kann jederzeit erneut auf neue Trades laufen).
+  async function runRegimeTagging() {
+    if (!activeStrategy) return
+    setRegimeLoading(true)
+    setRegimeError(null)
+    setRegimeDone(false)
+    setRegimeProgress('')
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setRegimeLoading(false); return }
+
+    const stratTrades = trades.filter(t => t.strategy_id === activeStrategy.id)
+    const regimeTagIds = new Set(
+      tagDefs.filter(td => Object.values(REGIME_TAG_NAMES).includes(td.name)).map(td => td.id)
+    )
+    const alreadyTaggedIds = new Set(assignments.filter(a => regimeTagIds.has(a.tag_id)).map(a => a.trade_id))
+    const toClassify = stratTrades.filter(t => !alreadyTaggedIds.has(t.id))
+
+    if (toClassify.length === 0) {
+      setRegimeError('Alle Trades dieser Strategie sind bereits klassifiziert.')
+      setRegimeLoading(false)
+      return
+    }
+
+    try {
+      const market = await getBinanceMarket()
+      const bySymbol = new Map<string, Trade[]>()
+      for (const t of toClassify) {
+        if (!bySymbol.has(t.symbol)) bySymbol.set(t.symbol, [])
+        bySymbol.get(t.symbol)!.push(t)
+      }
+
+      let currentTagDefs = [...tagDefs]
+      for (const name of Object.values(REGIME_TAG_NAMES)) {
+        if (!currentTagDefs.some(td => td.name === name)) {
+          const { data: created } = await supabase.from('trade_tag_definitions')
+            .insert({ user_id: user.id, name, tag_type: 'context' }).select()
+          if (created) currentTagDefs = [...currentTagDefs, ...created]
+        }
+      }
+
+      const newAssignments: TagAssignment[] = []
+      let done = 0
+      for (const [symbol, symTrades] of bySymbol) {
+        setRegimeProgress(`${symbol}: Tagesdaten laden...`)
+        const times = symTrades.map(t => new Date(t.opened_at).getTime())
+        const regimeMap = await buildDailyRegimeMap(symbol, Math.min(...times), Math.max(...times), market)
+
+        for (const t of symTrades) {
+          const dk = new Date(t.opened_at).toISOString().slice(0, 10)
+          const regime = regimeMap.get(dk)
+          if (!regime) { done++; continue }
+          const tagDef = currentTagDefs.find(td => td.name === REGIME_TAG_NAMES[regime])
+          if (!tagDef) { done++; continue }
+          const { error } = await supabase.from('trade_tag_assignments')
+            .insert({ trade_id: t.id, tag_id: tagDef.id, user_id: user.id })
+          if (!error) newAssignments.push({ trade_id: t.id, tag_id: tagDef.id })
+          done++
+          setRegimeProgress(`${done}/${toClassify.length} Trades klassifiziert...`)
+        }
+      }
+
+      setTagDefs(currentTagDefs)
+      if (newAssignments.length) setAssignments(prev => [...prev, ...newAssignments])
+      setRegimeDone(true)
+    } catch (e: any) {
+      setRegimeError(e?.message ?? 'Fehler')
+    } finally {
+      setRegimeLoading(false)
+      setRegimeProgress('')
+    }
   }
 
   // force=true: manually requested full re-analysis, bypassing the
@@ -1111,6 +1196,15 @@ Antworte auf Deutsch:
                 <Text style={s.retryRowText}>{autoTagFailed.length} fehlgeschlagene Trades erneut versuchen</Text>
               </PressFix>
             )}
+
+            {/* Marktphase (Trend/Range) pro Trade taggen - deterministisch aus Tageskerzen */}
+            <PressFix style={[s.kiBtn, { borderColor: '#f59e0b33', marginTop: 10 }]} onPress={runRegimeTagging} disabled={regimeLoading}>
+              {regimeLoading ? <ActivityIndicator size="small" color="#f59e0b" /> : <Feather name="trending-up" size={16} color="#f59e0b" />}
+              <Text style={[s.kiBtnText, { color: '#f59e0b' }]}>
+                {regimeLoading ? (regimeProgress || 'Klassifiziert...') : regimeDone ? 'Marktphase getaggt ✓' : 'Marktphase taggen (Trend/Range)'}
+              </Text>
+            </PressFix>
+            {regimeError && <Text style={s.kiError}>{regimeError}</Text>}
 
             {/* Kombinierte Analyse: neue Trades (kompakt) + beste/schlechteste 8 (Kerzen+Screenshots) */}
             {newTradesForRuleset.length >= NEW_TRADES_THRESHOLD && !combinedLoading && !combinedAnalysis && (
