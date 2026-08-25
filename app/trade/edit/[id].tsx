@@ -11,7 +11,7 @@ import { isoToDateStr, isoToTimeStr, parseDateTimeToISO } from '../../../src/lib
 import { DateTimeInputs } from '../../../src/components/DateTimeInputs'
 import { CandleTimePicker } from '../../../src/components/CandleTimePicker'
 import { normalizeSymbol } from '../../../src/lib/binance'
-import type { Trade, TagDefinition, StrategyProfile, ChecklistItem } from '../../../src/types'
+import type { Trade, TagDefinition, StrategyProfile, ChecklistItem, TradingAccount } from '../../../src/types'
 
 export default function EditTradeScreen() {
   const router = useRouter()
@@ -22,6 +22,7 @@ export default function EditTradeScreen() {
   const [trade, setTrade] = useState<Trade | null>(null)
   const [tags, setTags] = useState<TagDefinition[]>([])
   const [strategies, setStrategies] = useState<StrategyProfile[]>([])
+  const [accounts, setAccounts] = useState<TradingAccount[]>([])
   const [stratTagLinks, setStratTagLinks] = useState<{ tag_id: string; strategy_id: string }[]>([])
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
   const [rulesExpanded, setRulesExpanded] = useState(false)
@@ -43,6 +44,7 @@ export default function EditTradeScreen() {
     notes: '',
     screenshot_path: '',
     strategy_id: '',
+    account_id: '',
     trade_data_quality: 'live' as string,
     position_size: '',
     opened_at_date: '',
@@ -54,7 +56,7 @@ export default function EditTradeScreen() {
       if (!id) return
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const [{ data }, { data: tagDefs }, { data: assignments }, { data: strats }, { data: links }, { data: responses }, { data: ppData }] = await Promise.all([
+      const [{ data }, { data: tagDefs }, { data: assignments }, { data: strats }, { data: links }, { data: responses }, { data: ppData }, { data: accs }] = await Promise.all([
         supabase.from('trades').select('*').eq('id', id).single(),
         supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id).order('tag_type'),
         supabase.from('trade_tag_assignments').select('tag_id').eq('trade_id', id),
@@ -62,7 +64,9 @@ export default function EditTradeScreen() {
         supabase.from('strategy_tag_links').select('tag_id, strategy_id').eq('user_id', user.id),
         supabase.from('trade_checklist_responses').select('checklist_item_id, status').eq('trade_id', id),
         supabase.from('trade_partial_profits').select('*').eq('trade_id', id).order('target_price'),
+        supabase.from('trading_accounts').select('*').eq('user_id', user.id).eq('is_active', true),
       ])
+      setAccounts(accs ?? [])
       setTpLevels(
         (ppData ?? [])
           .filter((pp: any) => pp.quantity_percent > 0)
@@ -72,10 +76,16 @@ export default function EditTradeScreen() {
       if (beRow) setBePrice(String(beRow.target_price))
       if (!data) return
       setTrade(data)
-      // Load account balance for live risk calculation
+      // Load account balance for live risk calculation. Also covers the case
+      // where the trade's account was since deactivated (is_active=false) -
+      // it wouldn't be in `accs` above, so the picker would silently drop
+      // the trade's actual account; merge it back in if missing.
       if (data.account_id) {
-        const { data: acc } = await supabase.from('trading_accounts').select('initial_balance').eq('id', data.account_id).single()
-        if (acc) setAccountBalance(acc.initial_balance)
+        const { data: acc } = await supabase.from('trading_accounts').select('*').eq('id', data.account_id).single()
+        if (acc) {
+          setAccountBalance(acc.initial_balance)
+          setAccounts(prev => prev.some(a => a.id === acc.id) ? prev : [...prev, acc])
+        }
       }
       setTags(tagDefs ?? [])
       setStrategies(strats ?? [])
@@ -95,6 +105,7 @@ export default function EditTradeScreen() {
         notes: data.notes ?? '',
         screenshot_path: data.screenshot_path ?? '',
         strategy_id: stratId,
+        account_id: data.account_id ?? '',
         trade_data_quality: data.trade_data_quality ?? 'live',
         position_size: data.position_size != null ? String(data.position_size) : '',
         opened_at_date: data.opened_at ? isoToDateStr(data.opened_at) : '',
@@ -156,6 +167,12 @@ export default function EditTradeScreen() {
       }
       return next
     })
+  }
+
+  function selectAccount(accId: string) {
+    update('account_id', accId)
+    const acc = accounts.find(a => a.id === accId)
+    if (acc) setAccountBalance(acc.initial_balance)
   }
 
   function selectStrategy(stratId: string) {
@@ -290,6 +307,7 @@ export default function EditTradeScreen() {
       trade_data_quality: form.trade_data_quality,
       position_size: form.position_size ? parseFloat(form.position_size) : null,
       strategy_id: form.strategy_id || null,
+      account_id: form.account_id || trade?.account_id,
       opened_at: form.opened_at_date ? parseDateTimeToISO(form.opened_at_date, form.opened_at_time) : trade?.opened_at,
       closed_at: closedAt,
     }).eq('id', id)
@@ -425,6 +443,23 @@ export default function EditTradeScreen() {
             <Text style={[s.optionText, form.status === 'closed' && s.optionTextActive]}>Geschlossen</Text>
           </PressFix>
         </View>
+
+        {accounts.length > 0 && (
+          <>
+            <Text style={s.label}>Konto</Text>
+            <View style={s.optionRow}>
+              {accounts.map(acc => (
+                <PressFix
+                  key={acc.id}
+                  style={[s.option, form.account_id === acc.id && s.optionActive]}
+                  onPress={() => selectAccount(acc.id)}
+                >
+                  <Text style={[s.optionText, form.account_id === acc.id && s.optionTextActive]}>{acc.name}</Text>
+                </PressFix>
+              ))}
+            </View>
+          </>
+        )}
 
         <View style={s.row2}>
           <View style={{ flex: 2 }}>
