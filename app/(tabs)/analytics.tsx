@@ -14,10 +14,20 @@ import { PressFix } from '../../src/components/PressFix'
 import type { Trade, TagDefinition, StrategyProfile, ManagementEvent, TradingAccount } from '../../src/types'
 
 type Period = '7d' | '30d' | '90d' | 'all'
-type Mode = 'all' | TradingAccount['account_type']
+type EvalGroup = 'backtest' | 'live'
+type Mode = 'all' | EvalGroup
 
-function accountTypeLabel(t: TradingAccount['account_type']): string {
-  return t === 'live' ? 'Live' : t === 'demo' ? 'Demo' : t === 'prop' ? 'Prop' : 'Backtest'
+// Für die Auswertung zählt nicht der exakte Kontotyp, sondern ob echtes Geld
+// im echten Markt bewegt wird: Demo läuft wie Backtest ohne reales Risiko/
+// reale Ausführungspsychologie, Prop läuft wie Live mit echtem Konto und
+// echtem Drawdown-Druck - deshalb Demo→Backtest, Prop→Live statt 4 eigene
+// Buckets.
+function evalGroup(t: TradingAccount['account_type']): EvalGroup {
+  return t === 'live' || t === 'prop' ? 'live' : 'backtest'
+}
+
+function evalGroupLabel(g: EvalGroup): string {
+  return g === 'backtest' ? 'Backtest' : 'Live'
 }
 
 function tradesPerDay(list: Trade[], period: Period): number {
@@ -169,9 +179,9 @@ export default function AnalyticsScreen() {
     return map
   }, [managementEvents])
 
-  const accountTypeById = useMemo(() => {
-    const map = new Map<string, TradingAccount['account_type']>()
-    for (const a of accounts) map.set(a.id, a.account_type)
+  const accountGroupById = useMemo(() => {
+    const map = new Map<string, EvalGroup>()
+    for (const a of accounts) map.set(a.id, evalGroup(a.account_type))
     return map
   }, [accounts])
 
@@ -195,33 +205,29 @@ export default function AnalyticsScreen() {
     return result
   }, [trades, period, selectedStrategy])
 
-  // Welche der 4 Kontotypen der Nutzer überhaupt angelegt hat - Filter-Chips
-  // und Vergleichskarte zeigen nur die tatsächlich vorhandenen Typen, in
-  // fester Reihenfolge, statt hartkodiert nur Backtest/Live.
-  const presentAccountTypes = useMemo(() => {
-    const set = new Set(accounts.map(a => a.account_type))
-    return (['live', 'demo', 'prop', 'backtest'] as TradingAccount['account_type'][]).filter(t => set.has(t))
+  // Welche Auswertungs-Gruppen der Nutzer überhaupt hat (Backtest = Backtest-
+  // + Demo-Konten, Live = Live- + Prop-Konten) - Filter-Chips und
+  // Vergleichskarte zeigen nur vorhandene Gruppen.
+  const presentGroups = useMemo(() => {
+    const set = new Set(accounts.map(a => evalGroup(a.account_type)))
+    return (['backtest', 'live'] as EvalGroup[]).filter(g => set.has(g))
   }, [accounts])
 
-  const tradesByType = useMemo(() => {
-    const map = new Map<TradingAccount['account_type'], Trade[]>()
-    for (const type of presentAccountTypes) {
-      map.set(type, strategyPeriodFiltered.filter(t => accountTypeById.get(t.account_id) === type))
+  const tradesByGroup = useMemo(() => {
+    const map = new Map<EvalGroup, Trade[]>()
+    for (const g of presentGroups) {
+      map.set(g, strategyPeriodFiltered.filter(t => accountGroupById.get(t.account_id) === g))
     }
     return map
-  }, [presentAccountTypes, strategyPeriodFiltered, accountTypeById])
+  }, [presentGroups, strategyPeriodFiltered, accountGroupById])
 
-  // Die KI-Bewertung (weiter unten) bleibt bewusst auf Backtest/Live
-  // beschränkt - das ist der Vergleich, um den es beim Live-Übergang
-  // konkret geht. Demo/Prop tauchen im Filter und in der Vergleichskarte
-  // trotzdem vollständig auf.
-  const backtestTrades = tradesByType.get('backtest') ?? []
-  const liveTrades = tradesByType.get('live') ?? []
+  const backtestTrades = tradesByGroup.get('backtest') ?? []
+  const liveTrades = tradesByGroup.get('live') ?? []
 
   const filtered = useMemo(() => {
     if (mode === 'all') return strategyPeriodFiltered
-    return strategyPeriodFiltered.filter(t => accountTypeById.get(t.account_id) === mode)
-  }, [strategyPeriodFiltered, mode, accountTypeById])
+    return strategyPeriodFiltered.filter(t => accountGroupById.get(t.account_id) === mode)
+  }, [strategyPeriodFiltered, mode, accountGroupById])
 
   // Plain (non-hook) computation so it can also be called directly for an
   // arbitrary trade subset (the mode-specific KI-Bewertung), not just via
@@ -982,13 +988,13 @@ Antworte auf Deutsch:
           ))}
         </View>
 
-        {/* Kontotyp-Filter (nur Typen, für die tatsächlich Konten angelegt sind) */}
-        {presentAccountTypes.length > 0 && (
+        {/* Backtest/Live-Filter (Demo zählt zu Backtest, Prop zu Live) */}
+        {presentGroups.length > 0 && (
           <View style={s.periodRow}>
-            {(['all', ...presentAccountTypes] as Mode[]).map(m => (
+            {(['all', ...presentGroups] as Mode[]).map(m => (
               <PressFix key={m} style={[s.periodBtn, mode === m && s.periodActive]} onPress={() => setMode(m)}>
                 <Text style={[s.periodText, mode === m && s.periodTextActive]}>
-                  {m === 'all' ? 'Alle' : accountTypeLabel(m)}
+                  {m === 'all' ? 'Alle' : evalGroupLabel(m)}
                 </Text>
               </PressFix>
             ))}
@@ -999,15 +1005,12 @@ Antworte auf Deutsch:
           <Text style={s.filterLabel}>📊 {activeStratName} · {filtered.length} Trades</Text>
         )}
 
-        {presentAccountTypes.length > 1 && (
+        {presentGroups.length > 1 && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>Nach Kontotyp</Text>
-            <View style={[s.sideStats, { flexWrap: 'wrap' }]}>
-              {presentAccountTypes.map(type => (
-                <View key={type} style={{ minWidth: '47%', flexGrow: 1 }}>
-                  <SideStat label={accountTypeLabel(type)} trades={tradesByType.get(type) ?? []} eventsByTrade={eventsByTradeId} period={period} />
-                </View>
-              ))}
+            <Text style={s.sectionTitle}>Backtest vs. Live</Text>
+            <View style={s.sideStats}>
+              <SideStat label="Backtest" trades={backtestTrades} eventsByTrade={eventsByTradeId} period={period} />
+              <SideStat label="Live" trades={liveTrades} eventsByTrade={eventsByTradeId} period={period} />
             </View>
           </View>
         )}
