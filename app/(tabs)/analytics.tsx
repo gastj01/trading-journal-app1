@@ -11,7 +11,7 @@ import { calcWeightedR } from '../../src/lib/tradeCalc'
 import { fetchCandles, normalizeSymbol, normalizeInterval, getBinanceMarket } from '../../src/lib/binance'
 import { buildDailyRegimeMap, REGIME_TAG_NAMES } from '../../src/lib/marketRegime'
 import { PressFix } from '../../src/components/PressFix'
-import type { Trade, TagDefinition, StrategyProfile, ManagementEvent, TradingAccount } from '../../src/types'
+import type { Trade, TagDefinition, StrategyProfile, ManagementEvent, TradingAccount, PartialProfit } from '../../src/types'
 
 type Period = '7d' | '30d' | '90d' | 'all'
 type EvalGroup = 'backtest' | 'live'
@@ -64,6 +64,35 @@ const SESSIONS: { label: string; hours: number[]; color: string }[] = [
   { label: 'New York', hours: [13, 14, 15, 16, 17, 18, 19], color: '#22c55e' },
   { label: 'Sonstige', hours: [12, 20, 21, 22, 23], color: '#6b7280' },
 ]
+
+const MGMT_EVENT_LABELS: Record<string, string> = {
+  tp_hit: 'TP getroffen', sl_hit: 'SL getroffen', sl_moved_to_be: 'SL→BE verschoben',
+  partial_close: 'Teil-Close', manual_exit: 'Manueller Exit', limit_placed: 'Limit gesetzt',
+  limit_filled: 'Limit gefüllt', tp_moved_manual: 'TP manuell verschoben',
+  sl_moved_manual: 'SL manuell verschoben', note: 'Notiz',
+}
+
+// TP-Level (trade_partial_profits) wurden bisher gar nicht in Analytics
+// geladen - die KI-Prompts konnten sie also unmöglich sehen, unabhängig
+// vom Prompt-Text. Formatiert kompakt für den Prompt statt als Rohdaten.
+function formatTpLevels(pp: PartialProfit[]): string {
+  if (pp.length === 0) return 'keine dokumentiert'
+  return [...pp].sort((a, b) => a.target_price - b.target_price)
+    .map(p => p.quantity_percent > 0 ? `${p.label} ${p.target_price} (${Math.round(p.quantity_percent * 100)}%)` : `${p.label}-Trigger ${p.target_price}`)
+    .join(', ')
+}
+
+// Chronologische Abfolge der tatsächlichen Management-Events - ohne das
+// sieht die KI z.B. nicht, dass ein SL-Hit NACH einem TP1-Hit und einer
+// BE-Verschiebung passierte (also ein abgesicherter Trade war, kein Loss),
+// und kann eine BE-Verschiebung nicht im richtigen zeitlichen Kontext
+// bewerten statt rückblickend mit Wissen über spätere Kursbewegungen.
+function formatManagementEvents(events: ManagementEvent[]): string {
+  if (events.length === 0) return 'keine (unverwaltet bis Exit)'
+  return [...events].sort((a, b) => a.event_time.localeCompare(b.event_time))
+    .map(e => `${MGMT_EVENT_LABELS[e.event_type] ?? e.event_type}@${e.price} (${new Date(e.event_time).toISOString().slice(11, 16)} UTC)`)
+    .join(' → ')
+}
 
 async function copyKiText(text: string, setCopied: (v: boolean) => void) {
   await Clipboard.setStringAsync(text)
@@ -120,6 +149,7 @@ export default function AnalyticsScreen() {
   const [mode, setMode] = useState<Mode>('all')
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null)
   const [managementEvents, setManagementEvents] = useState<ManagementEvent[]>([])
+  const [partialProfits, setPartialProfits] = useState<PartialProfit[]>([])
   const [kiAnalysis, setKiAnalysis] = useState<{ backtest: string | null; live: string | null }>({ backtest: null, live: null })
   const [kiLoadingMode, setKiLoadingMode] = useState<'backtest' | 'live' | null>(null)
   const [kiErrorMode, setKiErrorMode] = useState<{ backtest: string | null; live: string | null }>({ backtest: null, live: null })
@@ -146,7 +176,7 @@ export default function AnalyticsScreen() {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const [{ data: tradeData }, { data: asgn }, { data: tags }, { data: strats }, { data: evData }, { data: rulesetHist }, { data: accts }] = await Promise.all([
+      const [{ data: tradeData }, { data: asgn }, { data: tags }, { data: strats }, { data: evData }, { data: rulesetHist }, { data: accts }, { data: ppData }] = await Promise.all([
         supabase.from('trades').select('*').eq('user_id', user.id).eq('status', 'closed').order('opened_at', { ascending: false }),
         supabase.from('trade_tag_assignments').select('tag_id, trade_id').eq('user_id', user.id),
         supabase.from('trade_tag_definitions').select('*').eq('user_id', user.id),
@@ -154,6 +184,7 @@ export default function AnalyticsScreen() {
         supabase.from('trade_management_events').select('*').eq('user_id', user.id),
         supabase.from('strategy_ruleset_history').select('strategy_id, created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
         supabase.from('trading_accounts').select('id, account_type').eq('user_id', user.id),
+        supabase.from('trade_partial_profits').select('*').eq('user_id', user.id),
       ])
       setTrades(tradeData ?? [])
       setAssignments(asgn ?? [])
@@ -161,6 +192,7 @@ export default function AnalyticsScreen() {
       setStrategies(strats ?? [])
       setManagementEvents(evData ?? [])
       setAccounts((accts ?? []) as TradingAccount[])
+      setPartialProfits(ppData ?? [])
       const versions: Record<string, string> = {}
       for (const h of rulesetHist ?? []) {
         if (!versions[h.strategy_id]) versions[h.strategy_id] = h.created_at
@@ -178,6 +210,15 @@ export default function AnalyticsScreen() {
     }
     return map
   }, [managementEvents])
+
+  const partialProfitsByTradeId = useMemo(() => {
+    const map = new Map<string, PartialProfit[]>()
+    for (const pp of partialProfits) {
+      if (!map.has(pp.trade_id)) map.set(pp.trade_id, [])
+      map.get(pp.trade_id)!.push(pp)
+    }
+    return map
+  }, [partialProfits])
 
   const accountGroupById = useMemo(() => {
     const map = new Map<string, EvalGroup>()
@@ -465,7 +506,9 @@ Direkt und präzise. Kein Intro.`
 
       const tradeBlocks = await Promise.all(batch.map(async (t, bi) => {
         const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
-        const header = `Trade ${bi + 1} (ID:${t.id}): ${t.symbol} ${t.side.toUpperCase()} | Entry:${t.entry_price} SL:${t.stop_loss} Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'} | Notes:${t.notes || '—'}`
+        const header = `Trade ${bi + 1} (ID:${t.id}): ${t.symbol} ${t.side.toUpperCase()} | Entry:${t.entry_price} SL:${t.stop_loss} Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'} | Notes:${t.notes || '—'}
+TP-LEVEL (vorab geplant): ${formatTpLevels(partialProfitsByTradeId.get(t.id) ?? [])}
+MANAGEMENT-VERLAUF (tatsächlich passiert, chronologisch): ${formatManagementEvents(eventsByTradeId.get(t.id) ?? [])}`
         const candleText = await buildCandleText(t)
         return header + (candleText ? `\nKERZEN:\n${candleText}` : '')
       }))
@@ -473,6 +516,8 @@ Direkt und präzise. Kein Intro.`
       const prompt = `Analysiere diese ${batch.length} Trades. Antworte NUR als JSON Array (kein Markdown).
 
 VORHANDENE TAGS: ${tagList}
+
+WICHTIG für ki_note: TP-LEVEL zeigt, was VOR dem Trade geplant war - wenn dort Level stehen, waren TPs dokumentiert, das nicht als "TP-Level nicht dokumentiert" kritisieren. MANAGEMENT-VERLAUF zeigt die tatsächliche chronologische Abfolge (z.B. TP1 getroffen → SL→BE verschoben → SL getroffen bedeutet: Gewinn gesichert, dann bei BE ausgestoppt, kein Loss). Eine BE-Verschiebung nur dann als "zu früh" kritisieren, wenn aus den Kerzendaten hervorgeht, dass der reguläre (ursprüngliche) SL zu keinem späteren Zeitpunkt erreicht worden wäre, bevor weitere TPs fielen - sonst war sie eine korrekte Risikoabsicherung, auch wenn im Nachhinein mehr drin gewesen wäre. Nicht rückblickend mit Wissen über spätere Kursbewegungen urteilen, das zum Entscheidungszeitpunkt nicht absehbar war.
 
 ${tradeBlocks.join('\n\n---\n\n')}
 
@@ -717,7 +762,8 @@ ${tradeBlocks.join('\n\n---\n\n')}
       const compactBlocks = targetTrades.map((t, i) => {
         const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
         const note = notesById.get(t.id)
-        return `Trade ${i + 1}: ${t.symbol} ${t.side.toUpperCase()} | Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'}${note ? ` | KI-Notiz: ${note}` : ''}`
+        const mgmt = formatManagementEvents(eventsByTradeId.get(t.id) ?? [])
+        return `Trade ${i + 1}: ${t.symbol} ${t.side.toUpperCase()} | Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'} | Mgmt:${mgmt}${note ? ` | KI-Notiz: ${note}` : ''}`
       }).join('\n')
 
       // Compressed mistake-tag digest: one line per Fehler-Tag (count + avg R), not per
@@ -771,7 +817,9 @@ ${tradeBlocks.join('\n\n---\n\n')}
 
       const sampleBlocks = await Promise.all(sampleTrades.map(async t => {
         const r = calcWeightedR(t, eventsByTradeId.get(t.id) ?? []) ?? 0
-        const header = `${t.symbol} ${t.side.toUpperCase()} | Entry:${t.entry_price} SL:${t.stop_loss} Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'} | Notes:${t.notes || '—'} | Setup:${t.setup || '—'}`
+        const header = `${t.symbol} ${t.side.toUpperCase()} | Entry:${t.entry_price} SL:${t.stop_loss} Result:${r > 0 ? '+' : ''}${r.toFixed(2)}R | TF:${t.timeframe || '—'} | Notes:${t.notes || '—'} | Setup:${t.setup || '—'}
+TP-LEVEL (vorab geplant): ${formatTpLevels(partialProfitsByTradeId.get(t.id) ?? [])}
+MANAGEMENT-VERLAUF (tatsächlich passiert, chronologisch): ${formatManagementEvents(eventsByTradeId.get(t.id) ?? [])}`
         const candleText = await buildCandleText(t, 40, 20, 20)
         return { t, header, candleText }
       }))
@@ -823,6 +871,7 @@ ${force
     ? `Aktualisiere das Regelwerk der Strategie "${activeStrategy.name}" anhand von ${targetTrades.length} NEUEN Trades seit der letzten Version. Baue auf dem bestehenden Regelwerk auf — verfeinere, ergänze oder korrigiere es, verwirf es nicht ohne guten Grund.`
     : `Analysiere alle ${targetTrades.length} Trades der Strategie "${activeStrategy.name}" und erstelle ein präzises Regelwerk.`}
 ${previousRuleset}${olderVersionsText}
+WICHTIG: "Mgmt" bei jedem Trade zeigt die tatsächliche chronologische Abfolge der Management-Events. Eine SL→BE-Verschiebung nur dann als "zu früh" kritisieren, wenn aus den Kerzendaten (Detail-Stichprobe) hervorgeht, dass der reguläre ursprüngliche SL zu keinem späteren Zeitpunkt erreicht worden wäre, bevor weitere TP-Level fielen — sonst war sie eine korrekte Risikoabsicherung, auch wenn im Nachhinein mehr drin gewesen wäre. Nicht rückblickend mit Wissen über spätere Kursbewegungen urteilen, das zum Entscheidungszeitpunkt nicht absehbar war. TP-LEVEL in der Detail-Stichprobe zeigt, was vorab geplant war — wenn dort Level stehen, waren TPs dokumentiert.
 ALLE ${isUpdate && !force ? 'NEUEN ' : ''}TRADES (kompakt):
 ${compactBlocks}
 ${mistakeDigest ? `\nFEHLER-MUSTER IN DIESEN TRADES:\n${mistakeDigest}\n` : ''}
