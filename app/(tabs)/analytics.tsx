@@ -431,8 +431,9 @@ export default function AnalyticsScreen() {
     const prompt = `Du bist ein erfahrener Trading-Coach. Bewerte diese Trading-Strategie objektiv auf Deutsch — ausschließlich anhand der ${modeLabel}-Trades.
 
 STRATEGIE: "${activeStrategy.name}" (${modeLabel})
-${activeStrategy.description ? `\nREGELWERK:\n${activeStrategy.description}` : '(Kein Regelwerk hinterlegt)'}
+${activeStrategy.description ? `\nREGELWERK (die Setup-Regeln selbst - wurde möglicherweise aus einer ANDEREN, größeren Trade-Menge abgeleitet und kann veraltete Zahlen/Trade-Anzahlen enthalten. Nutze daraus NUR die Regeln, keine darin erwähnten Zahlen/Statistiken):\n${activeStrategy.description}` : '(Kein Regelwerk hinterlegt)'}
 
+Für ALLE Zahlen in deiner Bewertung (Trade-Anzahl, Win Rate, R-Werte etc.) gilt ausschließlich der folgende PERFORMANCE-DATEN-Block, nicht Zahlen aus dem Regelwerk-Text oben:
 PERFORMANCE-DATEN (${modeTrades.length} ${modeLabel}-Trades, Zeitraum: ${period === 'all' ? 'Alle' : period}, ≈${freq.toFixed(2)} Trades/Tag):
 Win Rate: ${modeStats.winRate.toFixed(1)}%
 Total R: ${modeStats.totalR > 0 ? '+' : ''}${modeStats.totalR.toFixed(2)}R
@@ -883,6 +884,7 @@ ALLE ${isUpdate && !force ? 'NEUEN ' : ''}TRADES (kompakt):
 ${compactBlocks}
 ${mistakeDigest ? `\nFEHLER-MUSTER IN DIESEN TRADES:\n${mistakeDigest}\n` : ''}
 ${sampleText ? `\nDETAIL-STICHPROBE (beste/schlechteste ${sampleBlocks.length} mit Kerzendaten${hasImages ? ' + Screenshots oben' : ''}):\n${sampleText}\n` : ''}
+WICHTIG: Dieser Text wird als dauerhaftes Regelwerk gespeichert und später erneut zusammen mit ANDEREN, kleineren Trade-Mengen (z.B. nur Live- oder nur Backtest-Trades) als Kontext verwendet. Schreibe deshalb in SETUP-KRITERIEN/ENTRY-TRIGGER/STOP LOSS/TAKE PROFIT/FILTER nur die REGELN selbst, keine konkrete Trade-Anzahl oder Stichprobengröße - die würde in späteren, andere Trade-Mengen betreffenden Bewertungen fälschlich als aktuelle Zahl erscheinen. Zahlen/Statistiken gehören ausschließlich in MUSTER AUS DEN DATEN.
 Antworte auf Deutsch:
 
 **SETUP-KRITERIEN:**
