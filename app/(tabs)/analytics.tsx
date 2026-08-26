@@ -154,6 +154,8 @@ export default function AnalyticsScreen() {
   const [kiLoadingMode, setKiLoadingMode] = useState<'backtest' | 'live' | null>(null)
   const [kiErrorMode, setKiErrorMode] = useState<{ backtest: string | null; live: string | null }>({ backtest: null, live: null })
   const [kiCopiedMode, setKiCopiedMode] = useState<'backtest' | 'live' | null>(null)
+  const [kiExpanded, setKiExpanded] = useState<{ backtest: boolean; live: boolean }>({ backtest: false, live: false })
+  const [combinedExpanded, setCombinedExpanded] = useState(true)
   const [combinedAnalysis, setCombinedAnalysis] = useState<string | null>(null)
   const [combinedLoading, setCombinedLoading] = useState(false)
   const [combinedError, setCombinedError] = useState<string | null>(null)
@@ -362,6 +364,10 @@ export default function AnalyticsScreen() {
       live: activeStrategy?.last_ki_bewertung_live ?? null,
     })
     setKiErrorMode({ backtest: null, live: null })
+    // Beim Strategiewechsel eingeklappt starten (reduziert Scroll-Länge für
+    // bereits gespeicherte, "alte" Bewertungen) - eine frisch gelaufene
+    // Analyse klappt sich in runStrategyKI() explizit selbst auf.
+    setKiExpanded({ backtest: false, live: false })
   }, [activeStrategy?.id])
 
   const newTradesForRuleset = useMemo(() => {
@@ -463,6 +469,7 @@ Direkt und präzise. Kein Intro.`
       const data = await res.json()
       const text = data.content?.[0]?.text ?? 'Keine Antwort.'
       setKiAnalysis(prev => ({ ...prev, [kiMode]: text }))
+      setKiExpanded(prev => ({ ...prev, [kiMode]: true }))
       const now = new Date().toISOString()
       const field = kiMode === 'backtest' ? 'last_ki_bewertung' : 'last_ki_bewertung_live'
       const atField = kiMode === 'backtest' ? 'last_ki_bewertung_at' : 'last_ki_bewertung_live_at'
@@ -918,6 +925,7 @@ Antworte auf Deutsch:
       if (!res.ok) throw new Error(`API ${res.status}`)
       const data = await res.json()
       setCombinedAnalysis(data.content?.[0]?.text ?? 'Keine Antwort.')
+      setCombinedExpanded(true)
 
       // Mark this batch as reviewed so the next run (even on the same targetTrades,
       // e.g. re-running before saving) rotates to different trades instead of repeating.
@@ -1236,23 +1244,32 @@ Antworte auf Deutsch:
                   {error && <Text style={s.kiError}>{error}</Text>}
                   {analysis && (
                     <View style={s.kiResult}>
-                      <Text style={[s.kiHeading, { color, marginTop: 0, marginBottom: 6 }]}>{label}-Bewertung</Text>
-                      {analysis.split('\n').map((line, i) => {
-                        const isBold = line.startsWith('**') && line.includes('**', 2)
-                        if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
-                        if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
-                        return <Text key={i} style={s.kiText}>{line}</Text>
-                      })}
-                      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
-                        <PressFix onPress={() => setKiAnalysis(prev => ({ ...prev, [m]: null }))} style={s.kiRerun}>
-                          <Feather name="refresh-cw" size={12} color="#555" />
-                          <Text style={s.kiRerunText}>Neu analysieren</Text>
-                        </PressFix>
-                        <PressFix onPress={() => copyKiText(analysis, v => setKiCopiedMode(v ? m : null))} style={s.kiRerun}>
-                          <Feather name={copied ? 'check' : 'copy'} size={12} color={copied ? '#22c55e' : '#555'} />
-                          <Text style={[s.kiRerunText, copied && { color: '#22c55e' }]}>{copied ? 'Kopiert ✓' : 'Kopieren'}</Text>
-                        </PressFix>
-                      </View>
+                      <PressFix onPress={() => setKiExpanded(prev => ({ ...prev, [m]: !prev[m] }))} style={s.kiCollapseHeader}>
+                        <Text style={[s.kiHeading, { color, marginTop: 0, marginBottom: 0 }]}>{label}-Bewertung</Text>
+                        <Feather name={kiExpanded[m] ? 'chevron-up' : 'chevron-down'} size={16} color={color} />
+                      </PressFix>
+                      {kiExpanded[m] && (
+                        <>
+                          <View style={{ marginTop: 6 }}>
+                            {analysis.split('\n').map((line, i) => {
+                              const isBold = line.startsWith('**') && line.includes('**', 2)
+                              if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
+                              if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
+                              return <Text key={i} style={s.kiText}>{line}</Text>
+                            })}
+                          </View>
+                          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
+                            <PressFix onPress={() => setKiAnalysis(prev => ({ ...prev, [m]: null }))} style={s.kiRerun}>
+                              <Feather name="refresh-cw" size={12} color="#555" />
+                              <Text style={s.kiRerunText}>Neu analysieren</Text>
+                            </PressFix>
+                            <PressFix onPress={() => copyKiText(analysis, v => setKiCopiedMode(v ? m : null))} style={s.kiRerun}>
+                              <Feather name={copied ? 'check' : 'copy'} size={12} color={copied ? '#22c55e' : '#555'} />
+                              <Text style={[s.kiRerunText, copied && { color: '#22c55e' }]}>{copied ? 'Kopiert ✓' : 'Kopieren'}</Text>
+                            </PressFix>
+                          </View>
+                        </>
+                      )}
                     </View>
                   )}
                 </View>
@@ -1327,36 +1344,45 @@ Antworte auf Deutsch:
             {combinedWarning && <Text style={s.kiWarning}>{combinedWarning}</Text>}
             {combinedAnalysis && (
               <View style={s.kiResult}>
-                <Text style={[s.kiHeading, { color: '#38bdf8', marginBottom: 6 }]}>Regelwerk-Analyse</Text>
-                {combinedAnalysis.split('\n').map((line, i) => {
-                  const isBold = line.startsWith('**') && line.includes('**', 2)
-                  if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
-                  if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
-                  return <Text key={i} style={s.kiText}>{line}</Text>
-                })}
-                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
-                  <PressFix onPress={() => setCombinedAnalysis(null)} style={s.kiRerun}>
-                    <Feather name="refresh-cw" size={12} color="#555" />
-                    <Text style={s.kiRerunText}>Neu analysieren</Text>
-                  </PressFix>
-                  <PressFix onPress={() => copyKiText(combinedAnalysis, setCombinedCopied)} style={s.kiRerun}>
-                    <Feather name={combinedCopied ? 'check' : 'copy'} size={12} color={combinedCopied ? '#22c55e' : '#555'} />
-                    <Text style={[s.kiRerunText, combinedCopied && { color: '#22c55e' }]}>{combinedCopied ? 'Kopiert ✓' : 'Kopieren'}</Text>
-                  </PressFix>
-                  <PressFix
-                    onPress={() => saveAsRuleset(combinedAnalysis, () => {
-                      setCombinedSaved(true)
-                      setRulesetVersions(prev => ({ ...prev, [activeStrategy!.id]: new Date().toISOString() }))
-                    })}
-                    style={s.kiRerun}
-                    disabled={combinedSaved}
-                  >
-                    <Feather name="save" size={12} color={combinedSaved ? '#22c55e' : '#f59e0b'} />
-                    <Text style={[s.kiRerunText, { color: combinedSaved ? '#22c55e' : '#f59e0b' }]}>
-                      {combinedSaved ? 'Gespeichert ✓' : 'Regelwerk + Tags speichern'}
-                    </Text>
-                  </PressFix>
-                </View>
+                <PressFix onPress={() => setCombinedExpanded(v => !v)} style={s.kiCollapseHeader}>
+                  <Text style={[s.kiHeading, { color: '#38bdf8', marginTop: 0, marginBottom: 0 }]}>Regelwerk-Analyse</Text>
+                  <Feather name={combinedExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#38bdf8" />
+                </PressFix>
+                {combinedExpanded && (
+                  <>
+                    <View style={{ marginTop: 6 }}>
+                      {combinedAnalysis.split('\n').map((line, i) => {
+                        const isBold = line.startsWith('**') && line.includes('**', 2)
+                        if (isBold) return <Text key={i} style={s.kiHeading}>{line.replace(/\*\*/g, '')}</Text>
+                        if (line.trim() === '') return <View key={i} style={{ height: 6 }} />
+                        return <Text key={i} style={s.kiText}>{line}</Text>
+                      })}
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 }}>
+                      <PressFix onPress={() => setCombinedAnalysis(null)} style={s.kiRerun}>
+                        <Feather name="refresh-cw" size={12} color="#555" />
+                        <Text style={s.kiRerunText}>Neu analysieren</Text>
+                      </PressFix>
+                      <PressFix onPress={() => copyKiText(combinedAnalysis, setCombinedCopied)} style={s.kiRerun}>
+                        <Feather name={combinedCopied ? 'check' : 'copy'} size={12} color={combinedCopied ? '#22c55e' : '#555'} />
+                        <Text style={[s.kiRerunText, combinedCopied && { color: '#22c55e' }]}>{combinedCopied ? 'Kopiert ✓' : 'Kopieren'}</Text>
+                      </PressFix>
+                      <PressFix
+                        onPress={() => saveAsRuleset(combinedAnalysis, () => {
+                          setCombinedSaved(true)
+                          setRulesetVersions(prev => ({ ...prev, [activeStrategy!.id]: new Date().toISOString() }))
+                        })}
+                        style={s.kiRerun}
+                        disabled={combinedSaved}
+                      >
+                        <Feather name="save" size={12} color={combinedSaved ? '#22c55e' : '#f59e0b'} />
+                        <Text style={[s.kiRerunText, { color: combinedSaved ? '#22c55e' : '#f59e0b' }]}>
+                          {combinedSaved ? 'Gespeichert ✓' : 'Regelwerk + Tags speichern'}
+                        </Text>
+                      </PressFix>
+                    </View>
+                  </>
+                )}
               </View>
             )}
           </View>
@@ -1616,6 +1642,7 @@ const s = StyleSheet.create({
   retryRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   retryRowText: { color: '#f59e0b', fontSize: 12, fontWeight: '600' },
   kiResult: { backgroundColor: '#111', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#1e1e1e' },
+  kiCollapseHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   kiHeading: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 10, marginBottom: 2 },
   kiText: { color: '#bbb', fontSize: 13, lineHeight: 20 },
   kiRerun: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12, alignSelf: 'center' },
